@@ -6,3 +6,5 @@ test-output/
 *.obj
 *.lib
 *.exp
+*.png
+*.aex
