@@ -1,0 +1,8 @@
+build/
+test-output/
+*.aep
+*.aepx
+*.pdb
+*.obj
+*.lib
+*.exp
