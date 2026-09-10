@@ -3,14 +3,14 @@
     var folder = new Folder(root.fsName + '/test-output');
     var log = new File(folder.fsName + '/ae-smoke.log');
     function write(s) { $.writeln(s); try { if(log.open('a')) { log.writeln(s); log.close(); } } catch(ignore) {} }
-    function renderPNG(comp, name) {
+    function renderStill(comp, name) {
         var item=app.project.renderQueue.items.add(comp);
         item.timeSpanStart=0;item.timeSpanDuration=comp.frameDuration;
         var om=item.outputModule(1), found=false;
-        for(var t=0;t<om.templates.length;t++) if(/PNG/i.test(om.templates[t])) { om.applyTemplate(om.templates[t]);found=true;break; }
-        if(!found)throw new Error('No PNG output template: '+om.templates.join(', '));
+        for(var t=0;t<om.templates.length;t++) if(/TIFF/i.test(om.templates[t])) { om.applyTemplate(om.templates[t]);found=true;break; }
+        if(!found)throw new Error('No TIFF output template: '+om.templates.join(', '));
         try { om.setSettings({'Channels':'RGB + Alpha'}); } catch(ignore) {}
-        om.file=new File(folder.fsName+'/'+name+'_[#####].png');
+        om.file=new File(folder.fsName+'/'+name+'_[#####].tif');
         app.project.renderQueue.render();
         if(item.status!==RQItemStatus.DONE)throw new Error('Render failed: '+name);
         item.remove();
@@ -33,18 +33,21 @@
         mask.property('ADBE Mask Shape').setValue(shape);
         var fx = layer.property('ADBE Effect Parade').addProperty('Siosi CurveSmear');
         if (!fx) throw new Error('CurveSmear effect not found');
+        // Render once in the exact state users see immediately after adding the effect.
+        // No flow path is selected yet; this must be a clean pass-through.
+        renderStill(comp,'ae-no-path'); write('NO PATH OK');
         fx.property(1).setValue(1);
         for (var i=1; i<=fx.numProperties; i++) write(i + ': ' + fx.property(i).name + ' = ' + fx.property(i).value);
         comp.openInViewer();
         app.project.bitsPerChannel = 8;
-        renderPNG(comp,'ae8'); write('RENDER 8 OK');
+        renderStill(comp,'ae8'); write('RENDER 8 OK');
         fx.property(2).setValue(0);
-        renderPNG(comp,'ae-zero'); write('ZERO OK');
+        renderStill(comp,'ae-zero'); write('ZERO OK');
         fx.property(2).setValue(250);
         app.project.bitsPerChannel = 16;
-        renderPNG(comp,'ae16'); write('RENDER 16 OK');
+        renderStill(comp,'ae16'); write('RENDER 16 OK');
         app.project.bitsPerChannel = 32;
-        renderPNG(comp,'ae32'); write('RENDER 32 OK');
+        renderStill(comp,'ae32'); write('RENDER 32 OK');
         app.project.bitsPerChannel = 8;
         app.project.save(new File(folder.fsName + '/CurveSmear-test.aep'));
         write('SUCCESS');

@@ -43,9 +43,9 @@ template<class P> static void invariants(){
 int main(int argc,char** argv){
  invariants<PF_Pixel8>();invariants<PF_Pixel16>();invariants<PF_PixelFloat>();
  Image<PF_PixelFloat> hdr(2,2);hdr.at(0,0)={1,4,-.5f,2};hdr.at(1,0)={0,0,0,0};
- auto p=bilinear<PF_PixelFloat>(&hdr.world,.5,0,{},0);assert(p.alpha==.5f&&p.red==2&&p.green==-.25f&&p.blue==1);
+ auto sampleFloat=bilinear<PF_PixelFloat>(&hdr.world,.5,0,{},0);assert(sampleFloat.alpha==.5f&&sampleFloat.red==2&&sampleFloat.green==-.25f&&sampleFloat.blue==1);
  Image<PF_Pixel16> deep(2,2);deep.at(0,0)={32768,32768,0,0};auto q=bilinear<PF_Pixel16>(&deep.world,.5,0,{},0);assert(q.alpha==16384&&q.red==16384);
- assert(VERSION==32769);assert(FLAGS2==0x08001400);
+ assert(VERSION==36867);assert(FLAGS2==0x08201400);
  auto d=testData();auto a=d.curve.map({470,235},d.settings);d.settings.reverse=true;auto b=d.curve.map({470,235},d.settings);assert(a.source.x!=b.source.x);
  std::cout<<"PASS HDR above 1 and below 0, premultiplied alpha, AE 16bpc range, PiPL constants, reverse\n";
  if(argc==3){

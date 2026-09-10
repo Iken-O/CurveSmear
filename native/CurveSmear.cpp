@@ -19,8 +19,8 @@
 
 enum { SOURCE_INPUT, PATH, AMOUNT, RADIUS, FEATHER, STREAK, FREQUENCY, ORIGINAL, REVERSE, SEED, PREVIEW, COUNT };
 constexpr A_long FLAGS=PF_OutFlag_DEEP_COLOR_AWARE;
-constexpr A_long FLAGS2=PF_OutFlag2_SUPPORTS_SMART_RENDER|PF_OutFlag2_FLOAT_COLOR_AWARE|PF_OutFlag2_SUPPORTS_THREADED_RENDERING;
-constexpr A_u_long VERSION=PF_VERSION(0,1,0,PF_Stage_DEVELOP,1);
+constexpr A_long FLAGS2=PF_OutFlag2_SUPPORTS_SMART_RENDER|PF_OutFlag2_FLOAT_COLOR_AWARE|PF_OutFlag2_I_MIX_GUID_DEPENDENCIES|PF_OutFlag2_SUPPORTS_THREADED_RENDERING;
+constexpr A_u_long VERSION=PF_VERSION(0,1,2,PF_Stage_DEVELOP,3);
 static void check(PF_Err e){if(e)throw e;}
 template<class T> class Suite {
  SPBasicSuite* basic; const char* name; A_long version;
@@ -94,7 +94,13 @@ static PF_Err preRender(PF_InData* in,PF_OutData* out,PF_PreRenderExtra* extra){
  Params params(in);std::array<PF_ParamDef*,COUNT> p{};for(int k=1;k<COUNT;k++)p[k]=&params.p[k];
  auto d=std::make_unique<Data>(readData(in,out,p.data()));
  // Path geometry participates in the render cache, including animation of None masks.
- if(extra->cb->GuidMixInPtr&&!d->curve.segments.empty())check(extra->cb->GuidMixInPtr(in->effect_ref,static_cast<A_u_long>(d->curve.segments.size()*sizeof(smear::Segment)),d->curve.segments.data()));
+ // I_MIX_GUID_DEPENDENCIES requires at least one mix call on every pre-render,
+ // including the initial state before a mask has been selected.
+ struct PathDependencyHeader { A_u_long schema; A_u_long segment_count; };
+ const PathDependencyHeader dependency{1,static_cast<A_u_long>(d->curve.segments.size())};
+ if(!extra->cb->GuidMixInPtr)return PF_Err_BAD_CALLBACK_PARAM;
+ check(extra->cb->GuidMixInPtr(in->effect_ref,sizeof(dependency),&dependency));
+ if(!d->curve.segments.empty())check(extra->cb->GuidMixInPtr(in->effect_ref,static_cast<A_u_long>(d->curve.segments.size()*sizeof(smear::Segment)),d->curve.segments.data()));
  PF_RenderRequest req=extra->input->output_request;
  const A_long width=static_cast<A_long>(std::ceil(in->width*double(in->downsample_x.num)/in->downsample_x.den));
  const A_long height=static_cast<A_long>(std::ceil(in->height*double(in->downsample_y.num)/in->downsample_y.den));
@@ -154,7 +160,7 @@ extern "C" DllExport PF_Err PluginDataEntryFunction2(PF_PluginDataPtr ptr,PF_Plu
 extern "C" DllExport PF_Err EffectMain(PF_Cmd cmd,PF_InData* in,PF_OutData* out,PF_ParamDef* params[],PF_LayerDef* output,void* extra){
  try {
   switch(cmd){
-   case PF_Cmd_ABOUT:std::strcpy(out->return_msg,"CurveSmear 0.1\rLocal curve-driven smear. Select an open mask with Mask Mode: None.");break;
+   case PF_Cmd_ABOUT:std::strcpy(out->return_msg,"CurveSmear 0.1.2\rLocal curve-driven smear. Select an open mask with Mask Mode: None.");break;
    case PF_Cmd_GLOBAL_SETUP:out->my_version=VERSION;out->out_flags=FLAGS;out->out_flags2=FLAGS2;break;
    case PF_Cmd_PARAMS_SETUP:return setup(in,out);
    case PF_Cmd_SMART_PRE_RENDER:return preRender(in,out,static_cast<PF_PreRenderExtra*>(extra));
