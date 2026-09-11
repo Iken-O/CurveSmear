@@ -45,9 +45,17 @@ int main(int argc,char** argv){
  Image<PF_PixelFloat> hdr(2,2);hdr.at(0,0)={1,4,-.5f,2};hdr.at(1,0)={0,0,0,0};
  auto sampleFloat=bilinear<PF_PixelFloat>(&hdr.world,.5,0,{},0);assert(sampleFloat.alpha==.5f&&sampleFloat.red==2&&sampleFloat.green==-.25f&&sampleFloat.blue==1);
  Image<PF_Pixel16> deep(2,2);deep.at(0,0)={32768,32768,0,0};auto q=bilinear<PF_Pixel16>(&deep.world,.5,0,{},0);assert(q.alpha==16384&&q.red==16384);
- assert(VERSION==36867);assert(FLAGS2==0x08201400);
+ assert(VERSION==38916);assert(FLAGS==0x02008000);assert(FLAGS2==0x08201400);
  auto d=testData();auto a=d.curve.map({470,235},d.settings);d.settings.reverse=true;auto b=d.curve.map({470,235},d.settings);assert(a.source.x!=b.source.x);
- std::cout<<"PASS HDR above 1 and below 0, premultiplied alpha, AE 16bpc range, PiPL constants, reverse\n";
+ auto profile=smear::defaultProfile();for(double u:{0.,.25,.5,.75,1.})assert(smear::profileValue(profile,u)==1);
+ profile.points[0].y=.01f;assert(std::abs(smear::profileValue(profile,0)-.01)<1e-6);assert(std::abs(smear::profileValue(profile,.5)-.505)<1e-6);assert(smear::profileValue(profile,1)==1);
+ smear::flipProfile(profile);assert(profile.points[0].y==1&&std::abs(profile.points[1].y-.01f)<1e-6);smear::resetProfile(profile);assert(profile.count==2&&profile.points[0].y==1&&profile.points[1].y==1);
+ smear::Curve straight;straight.add({0,100},{100,100});smear::Settings tapered;tapered.amount=80;tapered.radius=20;tapered.feather=0;tapered.streak=0;tapered.profile.points[0].y=0;tapered.profile.points[1].y=1;smear::prepareProfile(tapered);
+ auto weak=straight.map({80,110},tapered),strong=straight.map({80,90},tapered);assert(std::abs(strong.source.x-80)>2.5*std::abs(weak.source.x-80));
+ tapered.profile.points[0].y=tapered.profile.points[1].y=0;smear::prepareProfile(tapered);auto stopped=straight.map({80,90},tapered);assert(stopped.source.x==80&&stopped.source.y==90);
+ auto cap=testData();auto roundCap=cap.curve.map({350,225},cap.settings);assert(roundCap.influence>0);cap.settings.flat=true;assert(cap.curve.map({350,225},cap.settings).influence==0);
+ Image<PF_Pixel8> binary(2,1,0);binary.at(0,0)={255,0,0,0};binary.at(1,0)={255,255,255,255};auto linearMid=bilinear<PF_Pixel8>(&binary.world,.45,0,{},0),nearestMid=nearest<PF_Pixel8>(&binary.world,.45,0,{},0);assert(linearMid.red>0&&linearMid.red<255);assert(nearestMid.red==0);
+ std::cout<<"PASS HDR, premultiplied alpha, AE 16bpc, PiPL flags/version, reverse, Flat cap, width profile mapping/reset/flip, nearest sampling\n";
  if(argc==3){
   Image<PF_Pixel8> source(800,520),dest(800,520);std::ifstream file(argv[1],std::ios::binary);std::vector<unsigned char> rgba(800*520*4);file.read(reinterpret_cast<char*>(rgba.data()),rgba.size());assert(file.gcount()==static_cast<std::streamsize>(rgba.size()));
   for(int y=0;y<520;y++)for(int x=0;x<800;x++){int i=(y*800+x)*4;double alpha=rgba[i+3]/255.;source.at(x,y)={rgba[i+3],channel<A_u_char>(rgba[i]*alpha),channel<A_u_char>(rgba[i+1]*alpha),channel<A_u_char>(rgba[i+2]*alpha)};}

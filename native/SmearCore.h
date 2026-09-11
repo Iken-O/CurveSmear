@@ -3,12 +3,15 @@
 #include <cmath>
 #include <limits>
 #include <vector>
+#include "ProfileData.h"
 
 namespace smear {
 struct Point { double x=0,y=0; };
 struct Segment { Point p; double dx,dy,len,s; };
-struct Settings { double amount=250,radius=65,feather=.55,streak=.65,frequency=17,original=0,seed=0; bool reverse=false,preview=false; };
-struct Mapping { Point source; double influence=0; };
+struct Settings { double amount=250,radius=65,feather=.55,streak=.65,frequency=17,original=0,seed=0; bool reverse=false,preview=false,flat=false,nearest=false; ProfileData profile=defaultProfile(); std::array<float,257> profile_lut=[](){std::array<float,257> a{};a.fill(1);return a;}(); };
+struct Mapping { Point source; double influence=0,profile_position=.5; };
+inline void prepareProfile(Settings& c){sanitizeProfile(c.profile);for(int i=0;i<=256;i++)c.profile_lut[i]=static_cast<float>(profileValue(c.profile,i/256.));}
+inline double profileGain(const Settings& c,double u){double v=std::clamp(u,0.,1.)*256;int i=static_cast<int>(v);double f=v-i;return c.profile_lut[i]*(1-f)+c.profile_lut[std::min(256,i+1)]*f;}
 class Curve {
 public:
  std::vector<Segment> segments;
@@ -26,7 +29,7 @@ public:
   return {g.p.x+t*g.dx-n*g.dy/g.len,g.p.y+t*g.dy+n*g.dx/g.len};
  }
  Mapping map(Point p,const Settings& c) const {
-  Mapping result{p,0};
+  Mapping result{p,0,.5};
   if(segments.empty()||c.radius<=0||p.x<left-c.radius||p.x>right+c.radius||p.y<top-c.radius||p.y>bottom+c.radius)return result;
   double best=c.radius*c.radius,s=0,n=0;bool found=false;
   for(const auto& g:segments){
@@ -34,14 +37,14 @@ public:
    double ex=rx-t*g.dx,ey=ry-t*g.dy,d=ex*ex+ey*ey;
    if(d<best){best=d;s=g.s+t*g.len;n=(g.dx*ry-g.dy*rx)/g.len;found=true;}
   }
-  if(!found)return result;
+  if(!found||c.flat&&(s<=1e-3||s>=length-1e-3))return result;
   double m=c.feather<=0?1.:std::clamp((c.radius-std::sqrt(best))/(c.radius*c.feather),0.,1.);
   if(c.feather>0)m=m*m*(3-2*m);
-  result.influence=m;if(c.amount<=0||c.original>=1)return result;
+  result.influence=m;result.profile_position=std::clamp((1-n/c.radius)/2,0.,1.);if(c.amount<=0||c.original>=1)return result;
   double v=n/std::max(20.,c.radius)*c.frequency+c.seed*1.61803398875;
   double noise=.5+.24*std::sin(v*1.17+1.4)+.16*std::sin(v*2.71+.3)+.10*std::sin(v*5.39+2.1);
   double travel=c.reverse?length-s:s;
-  double shift=travel*c.amount/(length+c.amount)*m*(1-c.streak*.85*noise);
+  double shift=travel*c.amount/(length+c.amount)*m*(1-c.streak*.85*noise)*profileGain(c,result.profile_position);
   Point a=frame(s,n),b=frame(s+(c.reverse?shift:-shift),n);
   result.source={p.x+b.x-a.x,p.y+b.y-a.y};return result;
  }

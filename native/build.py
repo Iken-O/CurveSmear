@@ -29,8 +29,8 @@ run([compiler,'/nologo','/EP',*includes,ROOT/'native/CurveSmearPiPL.r'],build/'C
 run([sdk/'Resources/PiPLTool.exe',build/'CurveSmear.rr',build/'CurveSmear.rrc'])
 run([compiler,'/nologo','/DMSWindows','/EP',build/'CurveSmear.rrc'],build/'CurveSmear.rc')
 run([kits/'bin'/version/'x64/rc.exe','/nologo',f'/fo{build / "CurveSmear.res"}',build/'CurveSmear.rc'])
-run([compiler,'/nologo','/std:c++17','/EHsc','/O2','/MT','/LD','/W4','/D_CRT_SECURE_NO_WARNINGS','/DMSWindows','/D_WINDOWS',*includes,ROOT/'native/CurveSmear.cpp',build/'CurveSmear.res','/link',f'/OUT:{plugin}'])
+run([compiler,'/nologo','/std:c++17','/EHsc','/O2','/MT','/LD','/W4','/D_CRT_SECURE_NO_WARNINGS','/DMSWindows','/D_WINDOWS',*includes,ROOT/'native/CurveSmear.cpp',ROOT/'native/CurveSmearUI.cpp',build/'CurveSmear.res','/link',f'/OUT:{plugin}'])
 print('Built:',plugin)
 if args.tests:
-    run([compiler,'/nologo','/std:c++17','/EHsc','/O2','/MT','/W4','/D_CRT_SECURE_NO_WARNINGS','/DMSWindows','/D_WINDOWS',*includes,ROOT/'native/CoreTests.cpp',f'/Fe:{build / "CoreTests.exe"}'])
+    run([compiler,'/nologo','/std:c++17','/EHsc','/O2','/MT','/W4','/D_CRT_SECURE_NO_WARNINGS','/DMSWindows','/D_WINDOWS',*includes,ROOT/'native/CoreTests.cpp',ROOT/'native/CurveSmearUI.cpp',f'/Fe:{build / "CoreTests.exe"}'])
     run([build/'CoreTests.exe'])

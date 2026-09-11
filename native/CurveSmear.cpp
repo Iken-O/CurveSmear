@@ -1,6 +1,7 @@
 #define PF_DEEP_COLOR_AWARE 1
 #define NOMINMAX
 #include "AEConfig.h"
+#include "AE_EffectVers.h"
 #include <Windows.h>
 #include "entry.h"
 #include "AE_Effect.h"
@@ -11,17 +12,24 @@
 #include "AE_PluginData.h"
 #include "Param_Utils.h"
 #include "SmearCore.h"
+#include "CurveSmearUI.h"
 #include <array>
 #include <cstring>
 #include <memory>
 #include <new>
 #include <type_traits>
 
-enum { SOURCE_INPUT, PATH, AMOUNT, RADIUS, FEATHER, STREAK, FREQUENCY, ORIGINAL, REVERSE, SEED, PREVIEW, COUNT };
-constexpr A_long FLAGS=PF_OutFlag_DEEP_COLOR_AWARE;
+constexpr A_long FLAGS=PF_OutFlag_DEEP_COLOR_AWARE|PF_OutFlag_CUSTOM_UI;
 constexpr A_long FLAGS2=PF_OutFlag2_SUPPORTS_SMART_RENDER|PF_OutFlag2_FLOAT_COLOR_AWARE|PF_OutFlag2_I_MIX_GUID_DEPENDENCIES|PF_OutFlag2_SUPPORTS_THREADED_RENDERING;
-constexpr A_u_long VERSION=PF_VERSION(0,1,2,PF_Stage_DEVELOP,3);
+constexpr A_u_long VERSION=PF_VERSION(0,1,3,PF_Stage_DEVELOP,4);
 static void check(PF_Err e){if(e)throw e;}
+static A_char* paramName(PF_ParamDef& d){
+#if PF_PLUG_IN_SUBVERS >= 29
+ return d.PF_DEF_NAME;
+#else
+ return d.name;
+#endif
+}
 template<class T> class Suite {
  SPBasicSuite* basic; const char* name; A_long version;
 public:
@@ -36,7 +44,7 @@ class Params {
  PF_InData* in;int acquired=0;
 public:
  std::array<PF_ParamDef,COUNT> p{};
- explicit Params(PF_InData* i):in(i){try{for(int k=1;k<COUNT;k++){check(PF_CHECKOUT_PARAM(in,k,in->current_time,in->time_step,in->time_scale,&p[k]));acquired=k;}}catch(...){release();throw;}}
+ explicit Params(PF_InData* i):in(i){try{for(int k=1;k<=LAST_RENDER_PARAM;k++){check(PF_CHECKOUT_PARAM(in,k,in->current_time,in->time_step,in->time_scale,&p[k]));acquired=k;}}catch(...){release();throw;}}
  void release(){for(int k=1;k<=acquired;k++)PF_CHECKIN_PARAM(in,&p[k]);acquired=0;}
  ~Params(){release();}
 };
@@ -73,10 +81,14 @@ static Data readData(PF_InData* in,PF_OutData* out,PF_ParamDef* p[]){
  s.feather=std::clamp(p[FEATHER]->u.fs_d.value/100,0.,1.);s.streak=std::clamp(p[STREAK]->u.fs_d.value/100,0.,1.);
  s.frequency=std::max(1.,p[FREQUENCY]->u.fs_d.value);s.original=std::clamp(p[ORIGINAL]->u.fs_d.value/100,0.,1.);
  s.reverse=p[REVERSE]->u.bd.value!=0;s.seed=p[SEED]->u.sd.value;s.preview=p[PREVIEW]->u.bd.value!=0;
+ s.flat=p[END_CAP]->u.pd.value==2;s.nearest=p[SAMPLING]->u.pd.value==2;
+ if(auto h=p[PROFILE]->u.arb_d.value){Suite<PF_HandleSuite1> handles(in,kPFHandleSuite,kPFHandleSuiteVersion1);auto profile=static_cast<const smear::ProfileData*>(handles->host_lock_handle(h));if(!profile)throw PF_Err_OUT_OF_MEMORY;s.profile=*profile;handles->host_unlock_handle(h);smear::sanitizeProfile(s.profile);}
+ s.profile.smooth=p[PROFILE_SMOOTH]->u.bd.value?1u:0u;
+ smear::prepareProfile(s);
  loadPath(in,out,p[PATH]->u.path_d.path_id,d.curve);return d;
 }
 static PF_Err setup(PF_InData* in_data,PF_OutData* out_data){
- PF_ParamDef def{};def.param_type=PF_Param_PATH;def.uu.id=PATH;std::strcpy(def.name,"Flow Path (open mask)");def.u.path_d.dephault=0;
+ PF_ParamDef def{};def.param_type=PF_Param_PATH;def.uu.id=PATH;std::strcpy(paramName(def),"Flow Path (open mask)");def.u.path_d.dephault=0;
  check(PF_ADD_PARAM(in_data,-1,&def));
  PF_ADD_FLOAT_SLIDERX("Smear Amount",0,10000,0,1000,250,1,0,0,AMOUNT);
  PF_ADD_FLOAT_SLIDERX("Radius",0,5000,0,500,65,1,0,0,RADIUS);
@@ -87,11 +99,21 @@ static PF_Err setup(PF_InData* in_data,PF_OutData* out_data){
  PF_ADD_CHECKBOXX("Reverse Flow",FALSE,0,REVERSE);
  AEFX_CLR_STRUCT(def);PF_ADD_SLIDER("Seed",0,100000,0,1000,0,SEED);
  PF_ADD_CHECKBOXX("Show Influence (rendered)",FALSE,0,PREVIEW);
+ // Existing projects keep the legacy Round/Linear behavior; new instances default to Flat/Nearest.
+ AEFX_CLR_STRUCT(def);def.param_type=PF_Param_POPUP;std::strcpy(paramName(def),"End Caps");def.u.pd.num_choices=2;def.u.pd.value=1;def.u.pd.dephault=2;def.u.pd.u.namesptr="Round|Flat";def.flags=PF_ParamFlag_USE_VALUE_FOR_OLD_PROJECTS;def.uu.id=END_CAP;check(PF_ADD_PARAM(in_data,-1,&def));
+ AEFX_CLR_STRUCT(def);def.param_type=PF_Param_POPUP;std::strcpy(paramName(def),"Sampling");def.u.pd.num_choices=2;def.u.pd.value=1;def.u.pd.dephault=2;def.u.pd.u.namesptr="Linear|Nearest";def.flags=PF_ParamFlag_USE_VALUE_FOR_OLD_PROJECTS;def.uu.id=SAMPLING;check(PF_ADD_PARAM(in_data,-1,&def));
+ PF_ArbitraryH profileDefault=nullptr;check(CreateDefaultProfile(in_data,&profileDefault));AEFX_CLR_STRUCT(def);
+ PF_ADD_ARBITRARY2("Width Profile",PROFILE_UI_WIDTH,PROFILE_UI_HEIGHT,PF_ParamFlag_CANNOT_TIME_VARY,PF_PUI_CONTROL|PF_PUI_DONT_ERASE_CONTROL,profileDefault,PROFILE,PROFILE_REFCON);
+ PF_ADD_CHECKBOXX("Smooth Profile",TRUE,PF_ParamFlag_CANNOT_TIME_VARY|PF_ParamFlag_SUPERVISE,PROFILE_SMOOTH);
+ PF_ADD_BUTTON("Profile", "Reset", PF_PUI_NONE, PF_ParamFlag_SUPERVISE, PROFILE_RESET);
+ PF_ADD_BUTTON("Profile", "Swap L/R", PF_PUI_NONE, PF_ParamFlag_SUPERVISE, PROFILE_FLIP);
+ PF_ADD_BUTTON("Profile", "Delete Selected Point", PF_PUI_NONE, PF_ParamFlag_SUPERVISE, PROFILE_DELETE);
+ PF_CustomUIInfo ui{};ui.events=PF_CustomEFlag_EFFECT;ui.comp_ui_alignment=ui.layer_ui_alignment=ui.preview_ui_alignment=PF_UIAlignment_NONE;check(in_data->inter.register_ui(in_data->effect_ref,&ui));
  out_data->num_params=COUNT;return PF_Err_NONE;
 }
 static void deleteData(void* p){delete static_cast<Data*>(p);}
 static PF_Err preRender(PF_InData* in,PF_OutData* out,PF_PreRenderExtra* extra){
- Params params(in);std::array<PF_ParamDef*,COUNT> p{};for(int k=1;k<COUNT;k++)p[k]=&params.p[k];
+ Params params(in);std::array<PF_ParamDef*,COUNT> p{};for(int k=1;k<=LAST_RENDER_PARAM;k++)p[k]=&params.p[k];
  auto d=std::make_unique<Data>(readData(in,out,p.data()));
  // Path geometry participates in the render cache, including animation of None masks.
  // I_MIX_GUID_DEPENDENCIES requires at least one mix call on every pre-render,
@@ -131,6 +153,10 @@ template<class Pixel> static Pixel bilinear(const PF_EffectWorld* w,double x,dou
  result.alpha=channel<C>(a*(1-mix)+original.alpha*mix);result.red=channel<C>(r*(1-mix)+original.red*mix);
  result.green=channel<C>(g*(1-mix)+original.green*mix);result.blue=channel<C>(b*(1-mix)+original.blue*mix);return result;
 }
+template<class Pixel> static Pixel nearest(const PF_EffectWorld* w,double x,double y,Pixel original,double mix){
+ Pixel p=get<Pixel>(w,static_cast<int>(std::round(x)),static_cast<int>(std::round(y))),result;using C=decltype(result.alpha);
+ result.alpha=channel<C>(p.alpha*(1-mix)+original.alpha*mix);result.red=channel<C>(p.red*(1-mix)+original.red*mix);result.green=channel<C>(p.green*(1-mix)+original.green*mix);result.blue=channel<C>(p.blue*(1-mix)+original.blue*mix);return result;
+}
 template<class Pixel> static PF_Err renderPixels(PF_InData* in,const PF_EffectWorld* input,PF_EffectWorld* output,const Data& data,bool smart){
  const double sx=double(in->downsample_x.num)/in->downsample_x.den,sy=double(in->downsample_y.num)/in->downsample_y.den;
  int ix=smart?input->origin_x:0,iy=smart?input->origin_y:0,ox=smart?output->origin_x:0,oy=smart?output->origin_y:0;
@@ -143,8 +169,8 @@ template<class Pixel> static PF_Err renderPixels(PF_InData* in,const PF_EffectWo
    if(!c.preview&&(c.amount<=0||c.original>=1||c.radius<=0))continue;
    smear::Point pos{(x+ox)/sx,(y+oy)/sy};auto mapped=data.curve.map(pos,c);
    if(mapped.influence<=0)continue;
-   if(c.preview){using C=decltype(row[x].alpha);double max=std::is_floating_point_v<C>?1.:sizeof(C)==1?255.:32768.;double m=mapped.influence*.35;row[x].red=channel<C>(original.red*(1-m)+max*.45*m);row[x].green=channel<C>(original.green*(1-m)+max*.8*m);row[x].blue=channel<C>(original.blue*(1-m)+max*m);row[x].alpha=channel<C>(original.alpha*(1-m)+max*m);}
-   else if(mapped.source.x!=pos.x||mapped.source.y!=pos.y)row[x]=bilinear<Pixel>(input,mapped.source.x*sx-ix,mapped.source.y*sy-iy,original,c.original);
+   if(c.preview){using C=decltype(row[x].alpha);double max=std::is_floating_point_v<C>?1.:sizeof(C)==1?255.:32768.,u=mapped.profile_position,m=mapped.influence*.35,rr=.96*(1-u)+.48*u,gg=.66*(1-u)+.72*u,bb=.35*(1-u)+u;row[x].red=channel<C>(original.red*(1-m)+max*rr*m);row[x].green=channel<C>(original.green*(1-m)+max*gg*m);row[x].blue=channel<C>(original.blue*(1-m)+max*bb*m);row[x].alpha=channel<C>(original.alpha*(1-m)+max*m);}
+   else if(mapped.source.x!=pos.x||mapped.source.y!=pos.y)row[x]=c.nearest?nearest<Pixel>(input,mapped.source.x*sx-ix,mapped.source.y*sy-iy,original,c.original):bilinear<Pixel>(input,mapped.source.x*sx-ix,mapped.source.y*sy-iy,original,c.original);
   }
  }return PF_Err_NONE;
 }
@@ -160,9 +186,12 @@ extern "C" DllExport PF_Err PluginDataEntryFunction2(PF_PluginDataPtr ptr,PF_Plu
 extern "C" DllExport PF_Err EffectMain(PF_Cmd cmd,PF_InData* in,PF_OutData* out,PF_ParamDef* params[],PF_LayerDef* output,void* extra){
  try {
   switch(cmd){
-   case PF_Cmd_ABOUT:std::strcpy(out->return_msg,"CurveSmear 0.1.2\rLocal curve-driven smear. Select an open mask with Mask Mode: None.");break;
+   case PF_Cmd_ABOUT:std::strcpy(out->return_msg,"CurveSmear 0.1.3\rLocal curve-driven smear with Flat/Round caps and an editable width profile.");break;
    case PF_Cmd_GLOBAL_SETUP:out->my_version=VERSION;out->out_flags=FLAGS;out->out_flags2=FLAGS2;break;
    case PF_Cmd_PARAMS_SETUP:return setup(in,out);
+   case PF_Cmd_ARBITRARY_CALLBACK:return HandleArbitrary(in,out,static_cast<PF_ArbParamsExtra*>(extra));
+   case PF_Cmd_EVENT:return HandleProfileEvent(in,out,params,static_cast<PF_EventExtra*>(extra));
+   case PF_Cmd_USER_CHANGED_PARAM:return HandleProfileButton(in,out,params,static_cast<PF_UserChangedParamExtra*>(extra));
    case PF_Cmd_SMART_PRE_RENDER:return preRender(in,out,static_cast<PF_PreRenderExtra*>(extra));
    case PF_Cmd_SMART_RENDER:{auto e=static_cast<PF_SmartRenderExtra*>(extra);PF_EffectWorld *input=nullptr,*dest=nullptr;check(e->cb->checkout_layer_pixels(in->effect_ref,0,&input));check(e->cb->checkout_output(in->effect_ref,&dest));auto d=static_cast<const Data*>(e->input->pre_render_data);if(!d||!input||!dest)return PF_Err_BAD_CALLBACK_PARAM;return render(in,input,dest,*d,true);}
    case PF_Cmd_RENDER:{auto d=readData(in,out,params);return render(in,&params[0]->u.ld,output,d,false);}

@@ -1,25 +1,26 @@
-# CurveSmear 0.1.2
+# CurveSmear 0.1.3
 
-開いたAEマスクパスを流れとして使い、Radius内だけをカーブに沿って引き伸ばすWindows用After Effectsエフェクトです。
+開いたAEマスクパスを流れとして使い、パスの周囲だけをカーブに沿って引き伸ばすWindows用After Effectsエフェクトです。
 
 ## インストール
 
-`dist/CurveSmear.aex` を次の共通プラグインフォルダへコピーまたはシンボリックリンクし、After Effectsを再起動します。
+`dist/CurveSmear.aex` を次の共通プラグインフォルダーへコピー、またはシンボリックリンクし、After Effectsを再起動します。
 
 `C:\Program Files\Adobe\Common\Plug-ins\7.0\MediaCore\`
 
 エフェクトは「エフェクト > CurveSmear > CurveSmear」に表示されます。
 
-## 使い方
+## 基本的な使い方
 
 1. 素材レイヤーへ開いたマスクパスを描きます。
 2. マスクモードを「なし」にします。
 3. CurveSmearを適用し、`Flow Path (open mask)`でそのマスクを選びます。
 4. `Smear Amount`と`Radius`を調整します。
+5. `Width Profile`でカーブのL側とR側それぞれの伸び倍率を調整します。
 
-選択中の素材へセットアップを自動作成する場合は、AEで `scripts/ApplyCurveSmear.jsx` を実行します。1080pの確認用コンポジションは `scripts/CreateDemo.jsx` で作成できます。
+選択中の素材へ基本設定を作る場合は `scripts/ApplyCurveSmear.jsx`、1080pの確認用コンポジションを作る場合は `scripts/CreateDemo.jsx` をAEで実行できます。
 
-## 主なパラメータ
+## パラメーター
 
 - `Smear Amount`: 流れに沿う伸びの量
 - `Radius`: カーブからの影響半径
@@ -27,14 +28,39 @@
 - `Streak Strength` / `Streak Frequency`: 漫画的な筋の強さと細かさ
 - `Keep Original`: 元画像との混合
 - `Reverse Flow`: 流れを反転
-- `Seed`: 筋のパターンを変更
-- `Show Influence (rendered)`: 影響範囲を描画して確認
+- `Seed`: 筋パターンを変更
+- `Show Influence (rendered)`: 影響範囲を描画。L側はオレンジ、R側は青
+- `End Caps`: `Round`は始点と終点を円形に、`Flat`は接線に直角な端にする
+- `Sampling`: `Linear`は線形補間、`Nearest`は最近傍補間。0/1素材の中間色を避けたい場合は`Nearest`
+- `Width Profile`: LからRへ0〜100%の伸び倍率を指定する編集グラフ
+- `Smooth Profile`: 点の間を滑らかな曲線で補間。オフでは直線補間
 
-## 対応状況
+`Width Profile`では、点をドラッグして移動し、空いている位置をクリックして中間点を追加します。`Delete Selected Point`で選択中の中間点を削除できます。`Reset`は中間点を消してL/Rを100%へ戻し、`Swap L/R`はグラフ全体を左右反転します。
+
+倍率グラフはカットごとの固定設定で、キーフレームには対応していません。新規エフェクトの初期値は`Flat`と`Nearest`です。0.1.2以前のプロジェクトを開いた場合は、従来結果を保つため`Round`と`Linear`になります。
+
+## 対応と確認状況
 
 - Windows x64
-- AE 25.5および26.3で読み込み・8/16/32bpc描画を確認
-- レイヤー境界内のみ描画
-- 1エフェクトにつき開いたパス1本
+- AE 25.5および26.3で読み込みと描画を確認
+- Adobe After Effects SDK 25.2および25.6でビルド確認
+- 8/16/32bpc、HDR値、タイル描画、縮小表示座標をテスト
+- PNGとEXRを含む、AEがデコードしたRGBAレイヤーを処理
+- 1エフェクトにつき開いたマスクパス1本
+- 出力領域はレイヤー境界内
 
-PNGやEXRをプラグインが直接開くのではなく、AEがデコードしたRGBAレイヤーを処理します。マルチEXRでは必要なパスをAE側で抽出してから適用してください。
+マルチチャンネルEXRでは、必要なパスをAE側で抽出してからCurveSmearを適用してください。
+
+## ビルド
+
+MSVCのDeveloper PowerShellで実行します。
+
+```powershell
+python native/build.py --tests --output CurveSmear.aex
+```
+
+別のSDKを使う場合は`--sdk`でAfterEffectsSDKディレクトリを指定します。
+
+```powershell
+python native/build.py --sdk "C:\SDK\Adobe\AE_SDK\AfterEffectsSDK_25.6_61_win\ae25.6_61.64bit.AfterEffectsSDK" --tests --output CurveSmear-0.1.3-sdk25.6.aex
+```
