@@ -8,7 +8,7 @@
 namespace smear {
 struct Point { double x=0,y=0; };
 struct Segment { Point p; double dx,dy,len,s; };
-struct Settings { double amount=250,radius=65,feather=.55,streak=.65,frequency=17,original=0,seed=0; bool reverse=false,preview=false,flat=false,nearest=false; ProfileData profile=defaultProfile(); std::array<float,257> profile_lut=[](){std::array<float,257> a{};a.fill(1);return a;}(); };
+struct Settings { double amount=250,radius=65,feather=.55,streak=.65,frequency=17,original=0,seed=0; bool reverse=false,preview=false,flat=false,nearest=false,matte_alpha=false,matte_invert=false; ProfileData profile=defaultProfile(); std::array<float,257> profile_lut=[](){std::array<float,257> a{};a.fill(1);return a;}(); };
 struct Mapping { Point source; double influence=0,profile_position=.5; };
 inline void prepareProfile(Settings& c){sanitizeProfile(c.profile);for(int i=0;i<=256;i++)c.profile_lut[i]=static_cast<float>(profileValue(c.profile,i/256.));}
 inline double profileGain(const Settings& c,double u){double v=std::clamp(u,0.,1.)*256;int i=static_cast<int>(v);double f=v-i;return c.profile_lut[i]*(1-f)+c.profile_lut[std::min(256,i+1)]*f;}

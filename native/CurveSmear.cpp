@@ -21,7 +21,7 @@
 
 constexpr A_long FLAGS=PF_OutFlag_DEEP_COLOR_AWARE|PF_OutFlag_CUSTOM_UI;
 constexpr A_long FLAGS2=PF_OutFlag2_SUPPORTS_SMART_RENDER|PF_OutFlag2_FLOAT_COLOR_AWARE|PF_OutFlag2_I_MIX_GUID_DEPENDENCIES|PF_OutFlag2_SUPPORTS_THREADED_RENDERING;
-constexpr A_u_long VERSION=PF_VERSION(0,1,3,PF_Stage_DEVELOP,4);
+constexpr A_u_long VERSION=PF_VERSION(0,1,4,PF_Stage_DEVELOP,5);
 static void check(PF_Err e){if(e)throw e;}
 static A_char* paramName(PF_ParamDef& d){
 #if PF_PLUG_IN_SUBVERS >= 29
@@ -41,11 +41,11 @@ public:
 };
 struct Data { smear::Curve curve; smear::Settings settings; };
 class Params {
- PF_InData* in;int acquired=0;
+ PF_InData* in;std::array<bool,COUNT> acquired{};
 public:
  std::array<PF_ParamDef,COUNT> p{};
- explicit Params(PF_InData* i):in(i){try{for(int k=1;k<=LAST_RENDER_PARAM;k++){check(PF_CHECKOUT_PARAM(in,k,in->current_time,in->time_step,in->time_scale,&p[k]));acquired=k;}}catch(...){release();throw;}}
- void release(){for(int k=1;k<=acquired;k++)PF_CHECKIN_PARAM(in,&p[k]);acquired=0;}
+ explicit Params(PF_InData* i):in(i){try{for(int k=1;k<COUNT;k++)if(k!=PROFILE_RESET&&k!=PROFILE_FLIP&&k!=PROFILE_DELETE&&k!=SOURCE_MATTE){check(PF_CHECKOUT_PARAM(in,k,in->current_time,in->time_step,in->time_scale,&p[k]));acquired[k]=true;}}catch(...){release();throw;}}
+ void release(){for(int k=1;k<COUNT;k++)if(acquired[k]){PF_CHECKIN_PARAM(in,&p[k]);acquired[k]=false;}}
  ~Params(){release();}
 };
 static void loadPath(PF_InData* in,PF_OutData* out,PF_PathID id,smear::Curve& curve){
@@ -82,6 +82,7 @@ static Data readData(PF_InData* in,PF_OutData* out,PF_ParamDef* p[]){
  s.frequency=std::max(1.,p[FREQUENCY]->u.fs_d.value);s.original=std::clamp(p[ORIGINAL]->u.fs_d.value/100,0.,1.);
  s.reverse=p[REVERSE]->u.bd.value!=0;s.seed=p[SEED]->u.sd.value;s.preview=p[PREVIEW]->u.bd.value!=0;
  s.flat=p[END_CAP]->u.pd.value==2;s.nearest=p[SAMPLING]->u.pd.value==2;
+ s.matte_alpha=p[MATTE_CHANNEL]->u.pd.value==2;s.matte_invert=p[MATTE_INVERT]->u.bd.value!=0;
  if(auto h=p[PROFILE]->u.arb_d.value){Suite<PF_HandleSuite1> handles(in,kPFHandleSuite,kPFHandleSuiteVersion1);auto profile=static_cast<const smear::ProfileData*>(handles->host_lock_handle(h));if(!profile)throw PF_Err_OUT_OF_MEMORY;s.profile=*profile;handles->host_unlock_handle(h);smear::sanitizeProfile(s.profile);}
  s.profile.smooth=p[PROFILE_SMOOTH]->u.bd.value?1u:0u;
  smear::prepareProfile(s);
@@ -108,12 +109,15 @@ static PF_Err setup(PF_InData* in_data,PF_OutData* out_data){
  PF_ADD_BUTTON("Profile", "Reset", PF_PUI_NONE, PF_ParamFlag_SUPERVISE, PROFILE_RESET);
  PF_ADD_BUTTON("Profile", "Swap L/R", PF_PUI_NONE, PF_ParamFlag_SUPERVISE, PROFILE_FLIP);
  PF_ADD_BUTTON("Profile", "Delete Selected Point", PF_PUI_NONE, PF_ParamFlag_SUPERVISE, PROFILE_DELETE);
+ AEFX_CLR_STRUCT(def);PF_ADD_LAYER("Source Matte",PF_LayerDefault_NONE,SOURCE_MATTE);
+ AEFX_CLR_STRUCT(def);PF_ADD_POPUP("Matte Channel",2,1,"Luminance|Alpha",MATTE_CHANNEL);
+ AEFX_CLR_STRUCT(def);PF_ADD_CHECKBOXX("Invert Matte",FALSE,0,MATTE_INVERT);
  PF_CustomUIInfo ui{};ui.events=PF_CustomEFlag_EFFECT;ui.comp_ui_alignment=ui.layer_ui_alignment=ui.preview_ui_alignment=PF_UIAlignment_NONE;check(in_data->inter.register_ui(in_data->effect_ref,&ui));
  out_data->num_params=COUNT;return PF_Err_NONE;
 }
 static void deleteData(void* p){delete static_cast<Data*>(p);}
 static PF_Err preRender(PF_InData* in,PF_OutData* out,PF_PreRenderExtra* extra){
- Params params(in);std::array<PF_ParamDef*,COUNT> p{};for(int k=1;k<=LAST_RENDER_PARAM;k++)p[k]=&params.p[k];
+ Params params(in);std::array<PF_ParamDef*,COUNT> p{};for(int k=1;k<COUNT;k++)p[k]=&params.p[k];
  auto d=std::make_unique<Data>(readData(in,out,p.data()));
  // Path geometry participates in the render cache, including animation of None masks.
  // I_MIX_GUID_DEPENDENCIES requires at least one mix call on every pre-render,
@@ -128,6 +132,7 @@ static PF_Err preRender(PF_InData* in,PF_OutData* out,PF_PreRenderExtra* extra){
  const A_long height=static_cast<A_long>(std::ceil(in->height*double(in->downsample_y.num)/in->downsample_y.den));
  req.rect={0,0,width,height};req.channel_mask=PF_ChannelMask_ARGB;req.preserve_rgb_of_zero_alpha=TRUE;
  PF_CheckoutResult result{};check(extra->cb->checkout_layer(in->effect_ref,0,0,&req,in->current_time,in->time_step,in->time_scale,&result));
+ PF_CheckoutResult matte_result{};check(extra->cb->checkout_layer(in->effect_ref,SOURCE_MATTE,SOURCE_MATTE,&req,in->current_time,in->time_step,in->time_scale,&matte_result));
  extra->output->max_result_rect={0,0,width,height};
  const auto& requested=extra->input->output_request.rect;
  extra->output->result_rect={std::max<A_long>(0,requested.left),std::max<A_long>(0,requested.top),std::min(width,requested.right),std::min(height,requested.bottom)};
@@ -157,9 +162,22 @@ template<class Pixel> static Pixel nearest(const PF_EffectWorld* w,double x,doub
  Pixel p=get<Pixel>(w,static_cast<int>(std::round(x)),static_cast<int>(std::round(y))),result;using C=decltype(result.alpha);
  result.alpha=channel<C>(p.alpha*(1-mix)+original.alpha*mix);result.red=channel<C>(p.red*(1-mix)+original.red*mix);result.green=channel<C>(p.green*(1-mix)+original.green*mix);result.blue=channel<C>(p.blue*(1-mix)+original.blue*mix);return result;
 }
-template<class Pixel> static PF_Err renderPixels(PF_InData* in,const PF_EffectWorld* input,PF_EffectWorld* output,const Data& data,bool smart){
+template<class Pixel> static double mattePixel(Pixel p,bool alpha){
+ using C=decltype(p.alpha);const double max=std::is_floating_point_v<C>?1.:sizeof(C)==1?255.:32768.;
+ return std::clamp(alpha?p.alpha/max:(.2126*p.red+.7152*p.green+.0722*p.blue)/max,0.,1.);
+}
+template<class Pixel> static double matteCoverage(const PF_EffectWorld* matte,double x,double y,bool nearest_sampling,bool alpha,bool invert){
+ if(!matte||!matte->data)return 1.;double value=0;
+ if(nearest_sampling)value=mattePixel(get<Pixel>(matte,static_cast<int>(std::round(x)),static_cast<int>(std::round(y))),alpha);
+ else if(std::isfinite(x)&&std::isfinite(y)&&x>-2&&y>-2&&x<matte->width+1&&y<matte->height+1){
+  int ix=static_cast<int>(std::floor(x)),iy=static_cast<int>(std::floor(y));double fx=x-ix,fy=y-iy;
+  for(int yy=0;yy<2;yy++)for(int xx=0;xx<2;xx++)value+=mattePixel(get<Pixel>(matte,ix+xx,iy+yy),alpha)*(xx?fx:1-fx)*(yy?fy:1-fy);
+ }
+ value=std::clamp(value,0.,1.);return invert?1-value:value;
+}
+template<class Pixel> static PF_Err renderPixels(PF_InData* in,const PF_EffectWorld* input,PF_EffectWorld* output,const Data& data,bool smart,const PF_EffectWorld* matte=nullptr){
  const double sx=double(in->downsample_x.num)/in->downsample_x.den,sy=double(in->downsample_y.num)/in->downsample_y.den;
- int ix=smart?input->origin_x:0,iy=smart?input->origin_y:0,ox=smart?output->origin_x:0,oy=smart?output->origin_y:0;
+ int ix=smart?input->origin_x:0,iy=smart?input->origin_y:0,ox=smart?output->origin_x:0,oy=smart?output->origin_y:0,mx=smart&&matte?matte->origin_x:0,my=smart&&matte?matte->origin_y:0;
  const auto& c=data.settings;
  for(int y=0;y<output->height;y++){
   if((y&31)==0){PF_Err e=PF_ABORT(in);if(e)return e;}
@@ -170,13 +188,13 @@ template<class Pixel> static PF_Err renderPixels(PF_InData* in,const PF_EffectWo
    smear::Point pos{(x+ox)/sx,(y+oy)/sy};auto mapped=data.curve.map(pos,c);
    if(mapped.influence<=0)continue;
    if(c.preview){using C=decltype(row[x].alpha);double max=std::is_floating_point_v<C>?1.:sizeof(C)==1?255.:32768.,u=mapped.profile_position,m=mapped.influence*.35,rr=.96*(1-u)+.48*u,gg=.66*(1-u)+.72*u,bb=.35*(1-u)+u;row[x].red=channel<C>(original.red*(1-m)+max*rr*m);row[x].green=channel<C>(original.green*(1-m)+max*gg*m);row[x].blue=channel<C>(original.blue*(1-m)+max*bb*m);row[x].alpha=channel<C>(original.alpha*(1-m)+max*m);}
-   else if(mapped.source.x!=pos.x||mapped.source.y!=pos.y)row[x]=c.nearest?nearest<Pixel>(input,mapped.source.x*sx-ix,mapped.source.y*sy-iy,original,c.original):bilinear<Pixel>(input,mapped.source.x*sx-ix,mapped.source.y*sy-iy,original,c.original);
+   else if(mapped.source.x!=pos.x||mapped.source.y!=pos.y){double coverage=matteCoverage<Pixel>(matte,mapped.source.x*sx-mx,mapped.source.y*sy-my,c.nearest,c.matte_alpha,c.matte_invert),keep=1-(1-c.original)*coverage;row[x]=c.nearest?nearest<Pixel>(input,mapped.source.x*sx-ix,mapped.source.y*sy-iy,original,keep):bilinear<Pixel>(input,mapped.source.x*sx-ix,mapped.source.y*sy-iy,original,keep);}
   }
  }return PF_Err_NONE;
 }
-static PF_Err render(PF_InData* in,PF_EffectWorld* input,PF_EffectWorld* output,const Data& d,bool smart){
+static PF_Err render(PF_InData* in,PF_EffectWorld* input,PF_EffectWorld* output,const Data& d,bool smart,const PF_EffectWorld* matte=nullptr){
  Suite<PF_WorldSuite2> world(in,kPFWorldSuite,kPFWorldSuiteVersion2);PF_PixelFormat format;check(world->PF_GetPixelFormat(output,&format));
- switch(format){case PF_PixelFormat_ARGB32:return renderPixels<PF_Pixel8>(in,input,output,d,smart);case PF_PixelFormat_ARGB64:return renderPixels<PF_Pixel16>(in,input,output,d,smart);case PF_PixelFormat_ARGB128:return renderPixels<PF_PixelFloat>(in,input,output,d,smart);default:return PF_Err_BAD_CALLBACK_PARAM;}
+ switch(format){case PF_PixelFormat_ARGB32:return renderPixels<PF_Pixel8>(in,input,output,d,smart,matte);case PF_PixelFormat_ARGB64:return renderPixels<PF_Pixel16>(in,input,output,d,smart,matte);case PF_PixelFormat_ARGB128:return renderPixels<PF_PixelFloat>(in,input,output,d,smart,matte);default:return PF_Err_BAD_CALLBACK_PARAM;}
 }
 extern "C" DllExport PF_Err PluginDataEntryFunction2(PF_PluginDataPtr ptr,PF_PluginDataCB2 callback,SPBasicSuite*,const char*,const char*){
  PF_Err result=PF_Err_NONE;
@@ -186,15 +204,15 @@ extern "C" DllExport PF_Err PluginDataEntryFunction2(PF_PluginDataPtr ptr,PF_Plu
 extern "C" DllExport PF_Err EffectMain(PF_Cmd cmd,PF_InData* in,PF_OutData* out,PF_ParamDef* params[],PF_LayerDef* output,void* extra){
  try {
   switch(cmd){
-   case PF_Cmd_ABOUT:std::strcpy(out->return_msg,"CurveSmear 0.1.3\rLocal curve-driven smear with Flat/Round caps and an editable width profile.");break;
+   case PF_Cmd_ABOUT:std::strcpy(out->return_msg,"CurveSmear 0.1.4\rLocal curve-driven smear with an editable width profile and optional source matte.");break;
    case PF_Cmd_GLOBAL_SETUP:out->my_version=VERSION;out->out_flags=FLAGS;out->out_flags2=FLAGS2;break;
    case PF_Cmd_PARAMS_SETUP:return setup(in,out);
    case PF_Cmd_ARBITRARY_CALLBACK:return HandleArbitrary(in,out,static_cast<PF_ArbParamsExtra*>(extra));
    case PF_Cmd_EVENT:return HandleProfileEvent(in,out,params,static_cast<PF_EventExtra*>(extra));
    case PF_Cmd_USER_CHANGED_PARAM:return HandleProfileButton(in,out,params,static_cast<PF_UserChangedParamExtra*>(extra));
    case PF_Cmd_SMART_PRE_RENDER:return preRender(in,out,static_cast<PF_PreRenderExtra*>(extra));
-   case PF_Cmd_SMART_RENDER:{auto e=static_cast<PF_SmartRenderExtra*>(extra);PF_EffectWorld *input=nullptr,*dest=nullptr;check(e->cb->checkout_layer_pixels(in->effect_ref,0,&input));check(e->cb->checkout_output(in->effect_ref,&dest));auto d=static_cast<const Data*>(e->input->pre_render_data);if(!d||!input||!dest)return PF_Err_BAD_CALLBACK_PARAM;return render(in,input,dest,*d,true);}
-   case PF_Cmd_RENDER:{auto d=readData(in,out,params);return render(in,&params[0]->u.ld,output,d,false);}
+   case PF_Cmd_SMART_RENDER:{auto e=static_cast<PF_SmartRenderExtra*>(extra);PF_EffectWorld *input=nullptr,*matte=nullptr,*dest=nullptr;check(e->cb->checkout_layer_pixels(in->effect_ref,0,&input));check(e->cb->checkout_layer_pixels(in->effect_ref,SOURCE_MATTE,&matte));check(e->cb->checkout_output(in->effect_ref,&dest));auto d=static_cast<const Data*>(e->input->pre_render_data);if(!d||!input||!dest)return PF_Err_BAD_CALLBACK_PARAM;return render(in,input,dest,*d,true,matte);}
+   case PF_Cmd_RENDER:{auto d=readData(in,out,params);PF_ParamDef matte{};check(PF_CHECKOUT_PARAM(in,SOURCE_MATTE,in->current_time,in->time_step,in->time_scale,&matte));PF_Err result=PF_Err_NONE;try{result=render(in,&params[0]->u.ld,output,d,false,matte.u.ld.data?&matte.u.ld:nullptr);}catch(...){PF_CHECKIN_PARAM(in,&matte);throw;}PF_CHECKIN_PARAM(in,&matte);return result;}
    default:break;
   }
  }catch(PF_Err e){return e;}catch(const std::bad_alloc&){return PF_Err_OUT_OF_MEMORY;}catch(...){return PF_Err_INTERNAL_STRUCT_DAMAGED;}
