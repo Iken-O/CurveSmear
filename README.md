@@ -1,4 +1,4 @@
-# CurveSmear 0.1.4
+# CurveSmear 0.1.7
 
 開いたAEマスクパスを流れとして使い、パスの周囲だけをカーブに沿って引き伸ばすWindows用After Effectsエフェクトです。
 
@@ -36,9 +36,10 @@
 - `Smooth Profile`: 点の間を滑らかな曲線で補間。オフでは直線補間
 - `Source Matte`: smearへ持ち込める元ピクセルを白黒レイヤーで指定。`None`なら従来動作
 - `Matte Channel`: マットの`Luminance`または`Alpha`を使用
-- `Invert Matte`: 白黒を反転
 
 `Width Profile`では、点をドラッグして移動し、空いている位置をクリックして中間点を追加します。`Delete Selected Point`で選択中の中間点を削除できます。`Reset`は中間点を消してL/Rを100%へ戻し、`Swap L/R`はグラフ全体を左右反転します。
+
+`Source Matte`と`Matte Channel`はエフェクトの先頭にあります。`Width Profile`はグラフ、`Smooth`、横1列の3操作ボタンを同じ折りたたみグループにまとめています。
 
 倍率グラフはカットごとの固定設定で、キーフレームには対応していません。新規エフェクトの初期値は`Flat`と`Nearest`です。0.1.2以前のプロジェクトを開いた場合は、従来結果を保つため`Round`と`Linear`になります。
 
@@ -67,5 +68,5 @@ python native/build.py --tests --output CurveSmear.aex
 別のSDKを使う場合は`--sdk`でAfterEffectsSDKディレクトリを指定します。
 
 ```powershell
-python native/build.py --sdk "C:\SDK\Adobe\AE_SDK\AfterEffectsSDK_25.6_61_win\ae25.6_61.64bit.AfterEffectsSDK" --tests --output CurveSmear-0.1.4-sdk25.6.aex
+python native/build.py --sdk "C:\SDK\Adobe\AE_SDK\AfterEffectsSDK_25.6_61_win\ae25.6_61.64bit.AfterEffectsSDK" --tests --output CurveSmear-0.1.7-sdk25.6.aex
 ```

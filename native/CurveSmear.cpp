@@ -21,7 +21,7 @@
 
 constexpr A_long FLAGS=PF_OutFlag_DEEP_COLOR_AWARE|PF_OutFlag_CUSTOM_UI;
 constexpr A_long FLAGS2=PF_OutFlag2_SUPPORTS_SMART_RENDER|PF_OutFlag2_FLOAT_COLOR_AWARE|PF_OutFlag2_I_MIX_GUID_DEPENDENCIES|PF_OutFlag2_SUPPORTS_THREADED_RENDERING;
-constexpr A_u_long VERSION=PF_VERSION(0,1,4,PF_Stage_DEVELOP,5);
+constexpr A_u_long VERSION=PF_VERSION(0,1,7,PF_Stage_DEVELOP,5);
 static void check(PF_Err e){if(e)throw e;}
 static A_char* paramName(PF_ParamDef& d){
 #if PF_PLUG_IN_SUBVERS >= 29
@@ -44,7 +44,7 @@ class Params {
  PF_InData* in;std::array<bool,COUNT> acquired{};
 public:
  std::array<PF_ParamDef,COUNT> p{};
- explicit Params(PF_InData* i):in(i){try{for(int k=1;k<COUNT;k++)if(k!=PROFILE_RESET&&k!=PROFILE_FLIP&&k!=PROFILE_DELETE&&k!=SOURCE_MATTE){check(PF_CHECKOUT_PARAM(in,k,in->current_time,in->time_step,in->time_scale,&p[k]));acquired[k]=true;}}catch(...){release();throw;}}
+ explicit Params(PF_InData* i):in(i){try{for(int k=1;k<COUNT;k++)if(k!=PROFILE_GROUP&&k!=PROFILE_GROUP_END&&k!=PROFILE_RESET&&k!=PROFILE_FLIP&&k!=PROFILE_DELETE&&k!=SOURCE_MATTE&&k!=LEGACY_INVERT_MATTE){check(PF_CHECKOUT_PARAM(in,k,in->current_time,in->time_step,in->time_scale,&p[k]));acquired[k]=true;}}catch(...){release();throw;}}
  void release(){for(int k=1;k<COUNT;k++)if(acquired[k]){PF_CHECKIN_PARAM(in,&p[k]);acquired[k]=false;}}
  ~Params(){release();}
 };
@@ -82,36 +82,42 @@ static Data readData(PF_InData* in,PF_OutData* out,PF_ParamDef* p[]){
  s.frequency=std::max(1.,p[FREQUENCY]->u.fs_d.value);s.original=std::clamp(p[ORIGINAL]->u.fs_d.value/100,0.,1.);
  s.reverse=p[REVERSE]->u.bd.value!=0;s.seed=p[SEED]->u.sd.value;s.preview=p[PREVIEW]->u.bd.value!=0;
  s.flat=p[END_CAP]->u.pd.value==2;s.nearest=p[SAMPLING]->u.pd.value==2;
- s.matte_alpha=p[MATTE_CHANNEL]->u.pd.value==2;s.matte_invert=p[MATTE_INVERT]->u.bd.value!=0;
+ s.matte_alpha=p[MATTE_CHANNEL]->u.pd.value==2;
  if(auto h=p[PROFILE]->u.arb_d.value){Suite<PF_HandleSuite1> handles(in,kPFHandleSuite,kPFHandleSuiteVersion1);auto profile=static_cast<const smear::ProfileData*>(handles->host_lock_handle(h));if(!profile)throw PF_Err_OUT_OF_MEMORY;s.profile=*profile;handles->host_unlock_handle(h);smear::sanitizeProfile(s.profile);}
  s.profile.smooth=p[PROFILE_SMOOTH]->u.bd.value?1u:0u;
  smear::prepareProfile(s);
  loadPath(in,out,p[PATH]->u.path_d.path_id,d.curve);return d;
 }
 static PF_Err setup(PF_InData* in_data,PF_OutData* out_data){
- PF_ParamDef def{};def.param_type=PF_Param_PATH;def.uu.id=PATH;std::strcpy(paramName(def),"Flow Path (open mask)");def.u.path_d.dephault=0;
+ PF_ParamDef def{};
+ PF_ADD_LAYER("Source Matte",PF_LayerDefault_NONE,DISK_SOURCE_MATTE);
+ AEFX_CLR_STRUCT(def);
+ PF_ADD_POPUP("Matte Channel",2,1,"Luminance|Alpha",DISK_MATTE_CHANNEL);
+ AEFX_CLR_STRUCT(def);def.param_type=PF_Param_PATH;def.uu.id=DISK_PATH;std::strcpy(paramName(def),"Flow Path (open mask)");def.u.path_d.dephault=0;
  check(PF_ADD_PARAM(in_data,-1,&def));
- PF_ADD_FLOAT_SLIDERX("Smear Amount",0,10000,0,1000,250,1,0,0,AMOUNT);
- PF_ADD_FLOAT_SLIDERX("Radius",0,5000,0,500,65,1,0,0,RADIUS);
- PF_ADD_FLOAT_SLIDERX("Edge Feather",0,100,0,100,55,1,PF_ValueDisplayFlag_PERCENT,0,FEATHER);
- PF_ADD_FLOAT_SLIDERX("Streak Strength",0,100,0,100,65,1,PF_ValueDisplayFlag_PERCENT,0,STREAK);
- PF_ADD_FLOAT_SLIDERX("Streak Frequency",1,100,1,35,17,1,0,0,FREQUENCY);
- PF_ADD_FLOAT_SLIDERX("Keep Original",0,100,0,100,0,1,PF_ValueDisplayFlag_PERCENT,0,ORIGINAL);
- PF_ADD_CHECKBOXX("Reverse Flow",FALSE,0,REVERSE);
- AEFX_CLR_STRUCT(def);PF_ADD_SLIDER("Seed",0,100000,0,1000,0,SEED);
- PF_ADD_CHECKBOXX("Show Influence (rendered)",FALSE,0,PREVIEW);
+ PF_ADD_FLOAT_SLIDERX("Smear Amount",0,10000,0,1000,250,1,0,0,DISK_AMOUNT);
+ PF_ADD_FLOAT_SLIDERX("Radius",0,5000,0,500,65,1,0,0,DISK_RADIUS);
+ PF_ADD_FLOAT_SLIDERX("Edge Feather",0,100,0,100,55,1,PF_ValueDisplayFlag_PERCENT,0,DISK_FEATHER);
+ PF_ADD_FLOAT_SLIDERX("Streak Strength",0,100,0,100,65,1,PF_ValueDisplayFlag_PERCENT,0,DISK_STREAK);
+ PF_ADD_FLOAT_SLIDERX("Streak Frequency",1,100,1,35,17,1,0,0,DISK_FREQUENCY);
+ PF_ADD_FLOAT_SLIDERX("Keep Original",0,100,0,100,0,1,PF_ValueDisplayFlag_PERCENT,0,DISK_ORIGINAL);
+ PF_ADD_CHECKBOXX("Reverse Flow",FALSE,0,DISK_REVERSE);
+ AEFX_CLR_STRUCT(def);PF_ADD_SLIDER("Seed",0,100000,0,1000,0,DISK_SEED);
+ PF_ADD_CHECKBOXX("Show Influence (rendered)",FALSE,0,DISK_PREVIEW);
  // Existing projects keep the legacy Round/Linear behavior; new instances default to Flat/Nearest.
- AEFX_CLR_STRUCT(def);def.param_type=PF_Param_POPUP;std::strcpy(paramName(def),"End Caps");def.u.pd.num_choices=2;def.u.pd.value=1;def.u.pd.dephault=2;def.u.pd.u.namesptr="Round|Flat";def.flags=PF_ParamFlag_USE_VALUE_FOR_OLD_PROJECTS;def.uu.id=END_CAP;check(PF_ADD_PARAM(in_data,-1,&def));
- AEFX_CLR_STRUCT(def);def.param_type=PF_Param_POPUP;std::strcpy(paramName(def),"Sampling");def.u.pd.num_choices=2;def.u.pd.value=1;def.u.pd.dephault=2;def.u.pd.u.namesptr="Linear|Nearest";def.flags=PF_ParamFlag_USE_VALUE_FOR_OLD_PROJECTS;def.uu.id=SAMPLING;check(PF_ADD_PARAM(in_data,-1,&def));
+ AEFX_CLR_STRUCT(def);def.param_type=PF_Param_POPUP;std::strcpy(paramName(def),"End Caps");def.u.pd.num_choices=2;def.u.pd.value=1;def.u.pd.dephault=2;def.u.pd.u.namesptr="Round|Flat";def.flags=PF_ParamFlag_USE_VALUE_FOR_OLD_PROJECTS;def.uu.id=DISK_END_CAP;check(PF_ADD_PARAM(in_data,-1,&def));
+ AEFX_CLR_STRUCT(def);def.param_type=PF_Param_POPUP;std::strcpy(paramName(def),"Sampling");def.u.pd.num_choices=2;def.u.pd.value=1;def.u.pd.dephault=2;def.u.pd.u.namesptr="Linear|Nearest";def.flags=PF_ParamFlag_USE_VALUE_FOR_OLD_PROJECTS;def.uu.id=DISK_SAMPLING;check(PF_ADD_PARAM(in_data,-1,&def));
+ AEFX_CLR_STRUCT(def);PF_ADD_TOPIC("Width Profile",DISK_PROFILE_GROUP);
  PF_ArbitraryH profileDefault=nullptr;check(CreateDefaultProfile(in_data,&profileDefault));AEFX_CLR_STRUCT(def);
- PF_ADD_ARBITRARY2("Width Profile",PROFILE_UI_WIDTH,PROFILE_UI_HEIGHT,PF_ParamFlag_CANNOT_TIME_VARY,PF_PUI_CONTROL|PF_PUI_DONT_ERASE_CONTROL,profileDefault,PROFILE,PROFILE_REFCON);
- PF_ADD_CHECKBOXX("Smooth Profile",TRUE,PF_ParamFlag_CANNOT_TIME_VARY|PF_ParamFlag_SUPERVISE,PROFILE_SMOOTH);
- PF_ADD_BUTTON("Profile", "Reset", PF_PUI_NONE, PF_ParamFlag_SUPERVISE, PROFILE_RESET);
- PF_ADD_BUTTON("Profile", "Swap L/R", PF_PUI_NONE, PF_ParamFlag_SUPERVISE, PROFILE_FLIP);
- PF_ADD_BUTTON("Profile", "Delete Selected Point", PF_PUI_NONE, PF_ParamFlag_SUPERVISE, PROFILE_DELETE);
- AEFX_CLR_STRUCT(def);PF_ADD_LAYER("Source Matte",PF_LayerDefault_NONE,SOURCE_MATTE);
- AEFX_CLR_STRUCT(def);PF_ADD_POPUP("Matte Channel",2,1,"Luminance|Alpha",MATTE_CHANNEL);
- AEFX_CLR_STRUCT(def);PF_ADD_CHECKBOXX("Invert Matte",FALSE,0,MATTE_INVERT);
+ PF_ADD_ARBITRARY2("",PROFILE_UI_WIDTH,PROFILE_UI_HEIGHT,PF_ParamFlag_CANNOT_TIME_VARY,PF_PUI_CONTROL,profileDefault,DISK_PROFILE,PROFILE_REFCON);
+ PF_ADD_CHECKBOXX("Smooth",TRUE,PF_ParamFlag_CANNOT_TIME_VARY|PF_ParamFlag_SUPERVISE,DISK_PROFILE_SMOOTH);
+ // Actions are drawn in one row inside the custom profile control. Hidden parameters retain stable disk IDs.
+ PF_ADD_BUTTON("", "Reset", PF_PUI_INVISIBLE, PF_ParamFlag_SUPERVISE, DISK_PROFILE_RESET);
+ PF_ADD_BUTTON("", "Swap L/R", PF_PUI_INVISIBLE, PF_ParamFlag_SUPERVISE, DISK_PROFILE_FLIP);
+ PF_ADD_BUTTON("", "Delete", PF_PUI_INVISIBLE, PF_ParamFlag_SUPERVISE, DISK_PROFILE_DELETE);
+ AEFX_CLR_STRUCT(def);PF_END_TOPIC(DISK_PROFILE_GROUP_END);
+ // Keep disk ID 20 loadable for projects saved by 0.1.4, but remove the control and behavior.
+ AEFX_CLR_STRUCT(def);def.param_type=PF_Param_CHECKBOX;std::strcpy(paramName(def),"Legacy Invert Matte");def.u.bd.dephault=FALSE;def.u.bd.value=FALSE;def.flags=PF_ParamFlag_CANNOT_TIME_VARY;def.ui_flags=PF_PUI_INVISIBLE;def.uu.id=DISK_LEGACY_INVERT_MATTE;check(PF_ADD_PARAM(in_data,-1,&def));
  PF_CustomUIInfo ui{};ui.events=PF_CustomEFlag_EFFECT;ui.comp_ui_alignment=ui.layer_ui_alignment=ui.preview_ui_alignment=PF_UIAlignment_NONE;check(in_data->inter.register_ui(in_data->effect_ref,&ui));
  out_data->num_params=COUNT;return PF_Err_NONE;
 }
@@ -166,14 +172,14 @@ template<class Pixel> static double mattePixel(Pixel p,bool alpha){
  using C=decltype(p.alpha);const double max=std::is_floating_point_v<C>?1.:sizeof(C)==1?255.:32768.;
  return std::clamp(alpha?p.alpha/max:(.2126*p.red+.7152*p.green+.0722*p.blue)/max,0.,1.);
 }
-template<class Pixel> static double matteCoverage(const PF_EffectWorld* matte,double x,double y,bool nearest_sampling,bool alpha,bool invert){
+template<class Pixel> static double matteCoverage(const PF_EffectWorld* matte,double x,double y,bool nearest_sampling,bool alpha){
  if(!matte||!matte->data)return 1.;double value=0;
  if(nearest_sampling)value=mattePixel(get<Pixel>(matte,static_cast<int>(std::round(x)),static_cast<int>(std::round(y))),alpha);
  else if(std::isfinite(x)&&std::isfinite(y)&&x>-2&&y>-2&&x<matte->width+1&&y<matte->height+1){
   int ix=static_cast<int>(std::floor(x)),iy=static_cast<int>(std::floor(y));double fx=x-ix,fy=y-iy;
   for(int yy=0;yy<2;yy++)for(int xx=0;xx<2;xx++)value+=mattePixel(get<Pixel>(matte,ix+xx,iy+yy),alpha)*(xx?fx:1-fx)*(yy?fy:1-fy);
  }
- value=std::clamp(value,0.,1.);return invert?1-value:value;
+ return std::clamp(value,0.,1.);
 }
 template<class Pixel> static PF_Err renderPixels(PF_InData* in,const PF_EffectWorld* input,PF_EffectWorld* output,const Data& data,bool smart,const PF_EffectWorld* matte=nullptr){
  const double sx=double(in->downsample_x.num)/in->downsample_x.den,sy=double(in->downsample_y.num)/in->downsample_y.den;
@@ -188,7 +194,7 @@ template<class Pixel> static PF_Err renderPixels(PF_InData* in,const PF_EffectWo
    smear::Point pos{(x+ox)/sx,(y+oy)/sy};auto mapped=data.curve.map(pos,c);
    if(mapped.influence<=0)continue;
    if(c.preview){using C=decltype(row[x].alpha);double max=std::is_floating_point_v<C>?1.:sizeof(C)==1?255.:32768.,u=mapped.profile_position,m=mapped.influence*.35,rr=.96*(1-u)+.48*u,gg=.66*(1-u)+.72*u,bb=.35*(1-u)+u;row[x].red=channel<C>(original.red*(1-m)+max*rr*m);row[x].green=channel<C>(original.green*(1-m)+max*gg*m);row[x].blue=channel<C>(original.blue*(1-m)+max*bb*m);row[x].alpha=channel<C>(original.alpha*(1-m)+max*m);}
-   else if(mapped.source.x!=pos.x||mapped.source.y!=pos.y){double coverage=matteCoverage<Pixel>(matte,mapped.source.x*sx-mx,mapped.source.y*sy-my,c.nearest,c.matte_alpha,c.matte_invert),keep=1-(1-c.original)*coverage;row[x]=c.nearest?nearest<Pixel>(input,mapped.source.x*sx-ix,mapped.source.y*sy-iy,original,keep):bilinear<Pixel>(input,mapped.source.x*sx-ix,mapped.source.y*sy-iy,original,keep);}
+   else if(mapped.source.x!=pos.x||mapped.source.y!=pos.y){double coverage=matteCoverage<Pixel>(matte,mapped.source.x*sx-mx,mapped.source.y*sy-my,c.nearest,c.matte_alpha),keep=1-(1-c.original)*coverage;row[x]=c.nearest?nearest<Pixel>(input,mapped.source.x*sx-ix,mapped.source.y*sy-iy,original,keep):bilinear<Pixel>(input,mapped.source.x*sx-ix,mapped.source.y*sy-iy,original,keep);}
   }
  }return PF_Err_NONE;
 }
@@ -204,7 +210,7 @@ extern "C" DllExport PF_Err PluginDataEntryFunction2(PF_PluginDataPtr ptr,PF_Plu
 extern "C" DllExport PF_Err EffectMain(PF_Cmd cmd,PF_InData* in,PF_OutData* out,PF_ParamDef* params[],PF_LayerDef* output,void* extra){
  try {
   switch(cmd){
-   case PF_Cmd_ABOUT:std::strcpy(out->return_msg,"CurveSmear 0.1.4\rLocal curve-driven smear with an editable width profile and optional source matte.");break;
+   case PF_Cmd_ABOUT:std::strcpy(out->return_msg,"CurveSmear 0.1.7\rLocal curve-driven smear with an editable width profile and optional source matte.");break;
    case PF_Cmd_GLOBAL_SETUP:out->my_version=VERSION;out->out_flags=FLAGS;out->out_flags2=FLAGS2;break;
    case PF_Cmd_PARAMS_SETUP:return setup(in,out);
    case PF_Cmd_ARBITRARY_CALLBACK:return HandleArbitrary(in,out,static_cast<PF_ArbParamsExtra*>(extra));

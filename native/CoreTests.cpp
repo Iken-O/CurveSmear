@@ -41,11 +41,13 @@ template<class P> static void invariants(){
  std::cout<<"PASS "<<sizeof(P)*8<<"-bit pixel: outside radius, zero, original, tiled output, cropped input, downsample\n";
 }
 int main(int argc,char** argv){
+ static_assert(SOURCE_MATTE==1&&MATTE_CHANNEL==2&&PATH==3&&PROFILE_GROUP==15&&PROFILE_GROUP_END==21&&LEGACY_INVERT_MATTE==22);
+ static_assert(DISK_PATH==1&&DISK_PROFILE==13&&DISK_SOURCE_MATTE==18&&DISK_MATTE_CHANNEL==19&&DISK_LEGACY_INVERT_MATTE==20);
  invariants<PF_Pixel8>();invariants<PF_Pixel16>();invariants<PF_PixelFloat>();
  Image<PF_PixelFloat> hdr(2,2);hdr.at(0,0)={1,4,-.5f,2};hdr.at(1,0)={0,0,0,0};
  auto sampleFloat=bilinear<PF_PixelFloat>(&hdr.world,.5,0,{},0);assert(sampleFloat.alpha==.5f&&sampleFloat.red==2&&sampleFloat.green==-.25f&&sampleFloat.blue==1);
  Image<PF_Pixel16> deep(2,2);deep.at(0,0)={32768,32768,0,0};auto q=bilinear<PF_Pixel16>(&deep.world,.5,0,{},0);assert(q.alpha==16384&&q.red==16384);
- assert(VERSION==40965);assert(FLAGS==0x02008000);assert(FLAGS2==0x08201400);
+ assert(VERSION==47109);assert(FLAGS==0x02008000);assert(FLAGS2==0x08201400);
  auto d=testData();auto a=d.curve.map({470,235},d.settings);d.settings.reverse=true;auto b=d.curve.map({470,235},d.settings);assert(a.source.x!=b.source.x);
  auto profile=smear::defaultProfile();for(double u:{0.,.25,.5,.75,1.})assert(smear::profileValue(profile,u)==1);
  profile.points[0].y=.01f;assert(std::abs(smear::profileValue(profile,0)-.01)<1e-6);assert(std::abs(smear::profileValue(profile,.5)-.505)<1e-6);assert(smear::profileValue(profile,1)==1);
@@ -55,7 +57,7 @@ int main(int argc,char** argv){
  tapered.profile.points[0].y=tapered.profile.points[1].y=0;smear::prepareProfile(tapered);auto stopped=straight.map({80,90},tapered);assert(stopped.source.x==80&&stopped.source.y==90);
  auto cap=testData();auto roundCap=cap.curve.map({350,225},cap.settings);assert(roundCap.influence>0);cap.settings.flat=true;assert(cap.curve.map({350,225},cap.settings).influence==0);
  Image<PF_Pixel8> binary(2,1,0);binary.at(0,0)={255,0,0,0};binary.at(1,0)={255,255,255,255};auto linearMid=bilinear<PF_Pixel8>(&binary.world,.45,0,{},0),nearestMid=nearest<PF_Pixel8>(&binary.world,.45,0,{},0);assert(linearMid.red>0&&linearMid.red<255);assert(nearestMid.red==0);
- assert(matteCoverage<PF_Pixel8>(&binary.world,0,0,true,false,false)==0);assert(std::abs(matteCoverage<PF_Pixel8>(&binary.world,1,0,true,false,false)-1)<1e-9);assert(matteCoverage<PF_Pixel8>(&binary.world,0,0,true,true,false)==1);assert(matteCoverage<PF_Pixel8>(&binary.world,0,0,true,false,true)==1);
+ assert(matteCoverage<PF_Pixel8>(&binary.world,0,0,true,false)==0);assert(std::abs(matteCoverage<PF_Pixel8>(&binary.world,1,0,true,false)-1)<1e-9);assert(matteCoverage<PF_Pixel8>(&binary.world,0,0,true,true)==1);
  Image<PF_Pixel8> matteSource(120,50,0),blackMatte(120,50,0),whiteMatte(120,50,0),matteOut(120,50,0);for(int y=0;y<50;y++)for(int x=0;x<120;x++){matteSource.at(x,y)={255,static_cast<A_u_char>(x*2),0,0};blackMatte.at(x,y)={255,0,0,0};whiteMatte.at(x,y)={255,255,255,255};}
  Data matteData;matteData.curve.add({10,25},{110,25});matteData.settings.amount=80;matteData.settings.radius=12;matteData.settings.feather=0;matteData.settings.streak=0;matteData.settings.nearest=true;PF_InData matteIn{};matteIn.downsample_x={1,1};matteIn.downsample_y={1,1};matteIn.inter.abort=noAbort;
  renderPixels<PF_Pixel8>(&matteIn,&matteSource.world,&matteOut.world,matteData,true,&blackMatte.world);for(int y=0;y<50;y++)for(int x=0;x<120;x++)assert(std::memcmp(&matteSource.at(x,y),&matteOut.at(x,y),sizeof(PF_Pixel8))==0);

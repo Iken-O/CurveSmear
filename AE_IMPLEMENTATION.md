@@ -30,6 +30,24 @@
 - Nearest時はマットも最近傍で読み、0/1マットへ新しい中間値を加えない。Linear時はマットも線形補間する。
 - Source MatteのSmart Render checkoutを追加し、レイヤー内容と時間変化をAEの依存関係へ含める。
 
+## 0.1.5で実装した項目
+
+- `Source Matte`と`Matte Channel`をエフェクト先頭へ移動し、`Invert Matte`のUIと動作を削除。0.1.4のAEPを読み込むためDisk ID 20だけを不可視で保持する。
+- 保存済みAEPとの対応に使うDisk IDと、画面上のパラメーター順を分離。既存パラメーターのDisk IDは維持する。
+- `Width Profile`をAEのトーンカーブに近い正方形、黒背景、灰色の点線グリッド・カーブ・ハンドルへ変更。
+- グラフ、`Smooth`、`Reset`、`Swap L/R`、`Delete Selected Point`を同じ`Width Profile`グループへ格納。グループを閉じると一式が折りたたまれる。
+
+## 0.1.6で実装した項目
+
+- カスタムUI全体を暗色で塗る処理を削除し、グラフ外はAE標準のパネル背景を使用。
+- 3つの操作ボタンをホストの縦並びパラメーターからグラフ内のカスタム描画へ移し、`Reset / Swap L/R / Delete`を横1列に配置。
+- 端点選択中は`Delete`を無効色で表示し、ボタン領域ではポインターカーソルを使用。
+
+## 0.1.7で実装した項目
+
+- `Width Profile`を横:縦=2:1の4列×2行グリッドへ変更し、操作領域全体の高さを縮小。
+- グラフ背景をAEのトーンカーブに近い明るさへ調整。
+
 倍率は法線位置を0〜1へ正規化して評価し、既存の移動量`shift`へ掛ける。0%ではその位置の変位を止め、100%では従来の伸び量を保つ。Radius、Edge Feather、Keep Originalとは独立した制御として扱う。
 
 ## 保存形式
@@ -42,8 +60,9 @@
 - AE 25.5でエフェクト追加、パス指定、描画、カスタムグラフのドラッグ、中間点追加・削除、Reset、Swap L/Rを確認。
 - AE 25.5で編集したAEPを保存し、AE 26.3で変換して読み込み。CurveSmearの18パラメーターが保持され、読み込みエラーがないことを確認。
 - 0.1.3で保存したAEPを0.1.4として開き、既存値を保ったまま21プロパティへ移行し、Source Matte=None、Luminance、Invertオフで初期化されることをAE 26.3で確認。
+- 0.1.5でパラメーターを並べ替えた後も、0.1.3で保存したAEPをAE 26.3のaerenderで変換・描画できることを確認。既存パラメーターのDisk IDは変更していない。
 - AE 25.5／26.3の実レンダーで、黒Luminanceが無変形、白Luminanceが変形、黒＋Invertおよび黒レイヤーのAlphaが白Luminanceと一致することを確認。
-- 8/16/32bpc、HDR、premultiplied alpha、タイル出力、切り抜かれた入力、縮小表示、Reverse、Flat端、プロファイル評価、Nearest、Source Matteの白黒・Luminance・Alpha・反転をネイティブテストで確認。
+- 8/16/32bpc、HDR、premultiplied alpha、タイル出力、切り抜かれた入力、縮小表示、Reverse、Flat端、プロファイル評価、Nearest、Source Matteの白黒・Luminance・Alphaをネイティブテストで確認。
 - `PF_OutFlag2_I_MIX_GUID_DEPENDENCIES`を宣言し、パス未指定時を含むすべてのSMART_PRE_RENDERで`GuidMixInPtr`を呼ぶ。
 
 ## 今後の候補
