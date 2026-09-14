@@ -1,5 +1,10 @@
 build/
 test-output/
+/benchmarks/
+/demo/
+/assets/demo-source.png
+/image.png
+/scripts/CreateDemo.jsx
 *.aep
 *.aepx
 *.pdb
@@ -9,3 +14,4 @@ test-output/
 *.png
 *.aex
 __pycache__/
+/docs

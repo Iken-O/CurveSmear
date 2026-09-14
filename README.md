@@ -4,7 +4,7 @@
 
 ## インストール
 
-`dist/CurveSmear.aex` を次の共通プラグインフォルダーへコピー、またはシンボリックリンクし、After Effectsを再起動します。
+GitHub Releasesから取得した`CurveSmear.aex`、または自分でビルドした`dist/CurveSmear.aex`を次の共通プラグインフォルダーへコピーし、After Effectsを再起動します。
 
 `C:\Program Files\Adobe\Common\Plug-ins\7.0\MediaCore\`
 
@@ -18,7 +18,7 @@
 4. `Smear Amount`と`Radius`を調整します。
 5. `Width Profile`でカーブのL側とR側それぞれの伸び倍率を調整します。
 
-選択中の素材へ基本設定を作る場合は `scripts/ApplyCurveSmear.jsx`、1080pの確認用コンポジションを作る場合は `scripts/CreateDemo.jsx` をAEで実行できます。
+選択中の素材へ基本設定を作る場合は `scripts/ApplyCurveSmear.jsx` をAEで実行できます。
 
 ## パラメーター
 
