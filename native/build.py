@@ -7,8 +7,10 @@ p.add_argument('--sdk',default=r'C:\SDK\Adobe\AE_SDK\25.2\AfterEffectsSDK')
 p.add_argument('--tests',action='store_true')
 p.add_argument('--benchmark-only',action='store_true',help='Build the standalone CPU benchmark without rebuilding the plugin')
 p.add_argument('--cuda',action='store_true',help='Build CUDA GPU Smart Render support')
+p.add_argument('--cuda-benchmark',action='store_true',help='Run the CUDA path-cache microbenchmark (requires --cuda)')
 p.add_argument('--output',default='CurveSmear.aex',help='Output filename inside dist/')
 args=p.parse_args()
+if args.cuda_benchmark and not args.cuda: p.error('--cuda-benchmark requires --cuda')
 sdk=pathlib.Path(args.sdk)/'Examples'
 compiler=pathlib.Path(shutil.which('cl') or '')
 if not compiler.is_file(): raise SystemExit('MSVC cl.exe must be on PATH')
@@ -49,3 +51,7 @@ print('Built:',plugin)
 if args.tests:
     run([compiler,'/nologo','/std:c++17','/EHsc','/O2','/MT','/W4','/D_CRT_SECURE_NO_WARNINGS','/DMSWindows','/D_WINDOWS',*defines,*includes,ROOT/'native/CoreTests.cpp',ROOT/'native/CurveSmearUI.cpp',*cuda_objects,f'/Fe:{build / "CoreTests.exe"}','/link',*cuda_link])
     run([build/'CoreTests.exe'])
+if args.cuda_benchmark:
+    benchmark=build/'CUDABenchmark.exe'
+    run([nvcc,'--std=c++17','-O3','-gencode=arch=compute_75,code=[sm_75,compute_75]',ROOT/'native/CUDABenchmark.cu',cuda_object,'-o',benchmark,'-I',ROOT/'native','-Xcompiler','/MT,/EHsc,/W3,/nologo,/wd4819'])
+    run([benchmark])

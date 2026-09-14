@@ -29,7 +29,7 @@ constexpr A_long FLAGS2=PF_OutFlag2_SUPPORTS_SMART_RENDER|PF_OutFlag2_FLOAT_COLO
  |PF_OutFlag2_SUPPORTS_GPU_RENDER_F32
 #endif
  ;
-constexpr A_u_long VERSION=PF_VERSION(0,1,9,PF_Stage_DEVELOP,5);
+constexpr A_u_long VERSION=PF_VERSION(0,1,10,PF_Stage_DEVELOP,5);
 static void check(PF_Err e){if(e)throw e;}
 static A_char* paramName(PF_ParamDef& d){
 #if PF_PLUG_IN_SUBVERS >= 29
@@ -216,9 +216,10 @@ static PF_Err render(PF_InData* in,PF_EffectWorld* input,PF_EffectWorld* output,
 }
 #ifdef CURVESMEAR_CUDA
 static PF_Err gpuDeviceSetup(PF_OutData* out,PF_GPUDeviceSetupExtra* extra){
- if(extra&&extra->input&&extra->input->what_gpu==PF_GPU_Framework_CUDA)out->out_flags2|=PF_OutFlag2_SUPPORTS_GPU_RENDER_F32;
+ if(extra&&extra->input&&extra->output&&extra->input->what_gpu==PF_GPU_Framework_CUDA){out->out_flags2|=PF_OutFlag2_SUPPORTS_GPU_RENDER_F32;extra->output->gpu_data=CreateCurveSmearCUDACache();if(!extra->output->gpu_data)return PF_Err_OUT_OF_MEMORY;}
  return PF_Err_NONE;
 }
+static PF_Err gpuDeviceSetdown(PF_GPUDeviceSetdownExtra* extra){if(extra&&extra->input)DestroyCurveSmearCUDACache(extra->input->gpu_data);return PF_Err_NONE;}
 static PF_Err gpuRender(PF_InData* in,PF_OutData* out,PF_SmartRenderExtra* extra){
  (void)out;
  if(!extra||!extra->input||extra->input->what_gpu!=PF_GPU_Framework_CUDA)return PF_Err_UNRECOGNIZED_PARAM_TYPE;
@@ -229,7 +230,7 @@ static PF_Err gpuRender(PF_InData* in,PF_OutData* out,PF_SmartRenderExtra* extra
  void *source_memory=nullptr,*matte_memory=nullptr,*dest_memory=nullptr;check(devices->GetGPUWorldData(in->effect_ref,input,&source_memory));check(devices->GetGPUWorldData(in->effect_ref,dest,&dest_memory));if(matte)check(devices->GetGPUWorldData(in->effect_ref,matte,&matte_memory));
  CUDAImage source{source_memory,input->width,input->height,input->rowbytes/16,input->origin_x,input->origin_y};CUDAImage output{dest_memory,dest->width,dest->height,dest->rowbytes/16,dest->origin_x,dest->origin_y};CUDAImage matte_image{matte_memory,matte?matte->width:0,matte?matte->height:0,matte?matte->rowbytes/16:0,matte?matte->origin_x:0,matte?matte->origin_y:0};
  double sx=double(in->downsample_x.num)/in->downsample_x.den,sy=double(in->downsample_y.num)/in->downsample_y.den;
- return RenderCurveSmearCUDA(data->curve,data->settings,source,matte?&matte_image:nullptr,output,sx,sy,info.command_queuePV)?PF_Err_NONE:PF_Err_INTERNAL_STRUCT_DAMAGED;
+ return RenderCurveSmearCUDA(data->curve,data->settings,source,matte?&matte_image:nullptr,output,sx,sy,info.command_queuePV,const_cast<void*>(extra->input->gpu_data))?PF_Err_NONE:PF_Err_INTERNAL_STRUCT_DAMAGED;
 }
 #endif
 extern "C" DllExport PF_Err PluginDataEntryFunction2(PF_PluginDataPtr ptr,PF_PluginDataCB2 callback,SPBasicSuite*,const char*,const char*){
@@ -240,7 +241,7 @@ extern "C" DllExport PF_Err PluginDataEntryFunction2(PF_PluginDataPtr ptr,PF_Plu
 extern "C" DllExport PF_Err EffectMain(PF_Cmd cmd,PF_InData* in,PF_OutData* out,PF_ParamDef* params[],PF_LayerDef* output,void* extra){
  try {
   switch(cmd){
-   case PF_Cmd_ABOUT:std::strcpy(out->return_msg,"CurveSmear 0.1.9\rCUDA GPU Smart Render with CPU fallback.");break;
+   case PF_Cmd_ABOUT:std::strcpy(out->return_msg,"CurveSmear 0.1.10\rCUDA GPU Smart Render with cached path data and CPU fallback.");break;
    case PF_Cmd_GLOBAL_SETUP:out->my_version=VERSION;out->out_flags=FLAGS;out->out_flags2=FLAGS2;break;
    case PF_Cmd_PARAMS_SETUP:return setup(in,out);
    case PF_Cmd_ARBITRARY_CALLBACK:return HandleArbitrary(in,out,static_cast<PF_ArbParamsExtra*>(extra));
@@ -248,7 +249,7 @@ extern "C" DllExport PF_Err EffectMain(PF_Cmd cmd,PF_InData* in,PF_OutData* out,
    case PF_Cmd_USER_CHANGED_PARAM:return HandleProfileButton(in,out,params,static_cast<PF_UserChangedParamExtra*>(extra));
 #ifdef CURVESMEAR_CUDA
    case PF_Cmd_GPU_DEVICE_SETUP:return gpuDeviceSetup(out,static_cast<PF_GPUDeviceSetupExtra*>(extra));
-   case PF_Cmd_GPU_DEVICE_SETDOWN:return PF_Err_NONE;
+   case PF_Cmd_GPU_DEVICE_SETDOWN:return gpuDeviceSetdown(static_cast<PF_GPUDeviceSetdownExtra*>(extra));
 #endif
    case PF_Cmd_SMART_PRE_RENDER:return preRender(in,out,static_cast<PF_PreRenderExtra*>(extra));
    case PF_Cmd_SMART_RENDER:{auto e=static_cast<PF_SmartRenderExtra*>(extra);PF_EffectWorld *input=nullptr,*matte=nullptr,*dest=nullptr;check(e->cb->checkout_layer_pixels(in->effect_ref,0,&input));check(e->cb->checkout_layer_pixels(in->effect_ref,SOURCE_MATTE,&matte));check(e->cb->checkout_output(in->effect_ref,&dest));auto d=static_cast<const Data*>(e->input->pre_render_data);if(!d||!input||!dest)return PF_Err_BAD_CALLBACK_PARAM;return render(in,input,dest,*d,true,matte);}

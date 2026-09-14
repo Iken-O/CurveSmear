@@ -1,6 +1,12 @@
 #include "CurveSmearCUDA.h"
 #include <cuda_runtime.h>
+#include <atomic>
 #include <cstdint>
+#include <cstring>
+#include <memory>
+#include <mutex>
+#include <new>
+#include <unordered_map>
 #include <vector>
 
 namespace {
@@ -11,9 +17,28 @@ struct GPUSettings {
  int reverse,preview,flat,nearest,matte_alpha,segment_count,index_ready,index_columns,index_rows;
  float profile[257];
 };
-struct DeviceData {GPUSegment* segments=nullptr;std::uint32_t* offsets=nullptr;std::uint32_t* indices=nullptr;};
 struct DPoint {double x,y;};
 struct DMapping {DPoint source;double influence,profile_position;};
+
+struct DeviceBuffer {
+ void* data=nullptr;size_t capacity=0;
+ ~DeviceBuffer(){cudaFree(data);}
+ bool ensure(size_t bytes,std::atomic_ullong* allocation_count){
+  if(bytes<=capacity)return true;
+  void* replacement=nullptr;if(cudaMalloc(&replacement,bytes)!=cudaSuccess)return false;
+  cudaFree(data);data=replacement;capacity=bytes;if(allocation_count)allocation_count->fetch_add(1,std::memory_order_relaxed);return true;
+ }
+};
+struct CacheSlot {
+ std::mutex mutex;DeviceBuffer segments,offsets,indices;
+ std::vector<GPUSegment> host_segments;std::vector<std::uint32_t> host_offsets,host_indices;
+ void invalidate(){host_segments.clear();host_offsets.clear();host_indices.clear();}
+};
+struct CUDAPathCache {
+ std::mutex slots_mutex;std::unordered_map<void*,std::shared_ptr<CacheSlot>> slots;
+ std::atomic_ullong renders{0},geometry_uploads{0},cache_hits{0},allocations{0};
+};
+constexpr size_t MAX_STREAM_SLOTS=32;
 
 __device__ double clampd(double value,double low,double high){return value<low?low:value>high?high:value;}
 __device__ float4 zero4(){return make_float4(0,0,0,0);}
@@ -78,28 +103,52 @@ __global__ void curveSmearKernel(const float4* source,float4* output,const float
  if(settings.preview){double u=mapped.profile_position,m=mapped.influence*.35,rr=.96*(1-u)+.48*u,gg=.66*(1-u)+.72*u,bb=.35*(1-u)+u;output[y*dst.pitch+x]=make_float4(static_cast<float>(original.x*(1-m)+bb*m),static_cast<float>(original.y*(1-m)+gg*m),static_cast<float>(original.z*(1-m)+rr*m),static_cast<float>(original.w*(1-m)+m));}
  else if(mapped.source.x!=pos.x||mapped.source.y!=pos.y){double coverage=matteCoverage(matte,mat.pitch,mat.width,mat.height,mapped.source.x*scale_x-mat.origin_x,mapped.source.y*scale_y-mat.origin_y,settings.nearest,settings.matte_alpha),keep=1-(1-settings.original)*coverage;output[y*dst.pitch+x]=settings.nearest?nearest(source,src.pitch,src.width,src.height,mapped.source.x*scale_x-src.origin_x,mapped.source.y*scale_y-src.origin_y,original,keep):bilinear(source,src.pitch,src.width,src.height,mapped.source.x*scale_x-src.origin_x,mapped.source.y*scale_y-src.origin_y,original,keep);}
 }
-bool allocateAndCopy(void** destination,const void* source,size_t bytes,cudaStream_t stream){if(!bytes){*destination=nullptr;return true;}if(cudaMalloc(destination,bytes)!=cudaSuccess)return false;if(cudaMemcpyAsync(*destination,source,bytes,cudaMemcpyHostToDevice,stream)!=cudaSuccess){cudaFree(*destination);*destination=nullptr;return false;}return true;}
+template<class T> bool sameVector(const std::vector<T>& cached,const T* source,size_t count){return cached.size()==count&&(!count||std::memcmp(cached.data(),source,count*sizeof(T))==0);}
+template<class T> bool updateBuffer(DeviceBuffer& device,std::vector<T>& cached,const T* source,size_t count,cudaStream_t stream,std::atomic_ullong* allocation_count,bool& uploaded){
+ if(sameVector(cached,source,count))return true;
+ const size_t bytes=count*sizeof(T);if(bytes&&!device.ensure(bytes,allocation_count))return false;
+ if(bytes&&cudaMemcpyAsync(device.data,source,bytes,cudaMemcpyHostToDevice,stream)!=cudaSuccess)return false;
+ if(count)cached.assign(source,source+count);else cached.clear();uploaded=true;return true;
+}
 }
 
-bool RenderCurveSmearCUDA(const smear::Curve& curve,const smear::Settings& settings,const CUDAImage& source,const CUDAImage* matte,CUDAImage& output,double scale_x,double scale_y,void* stream_pointer){
- cudaStream_t stream=static_cast<cudaStream_t>(stream_pointer);DeviceData device;auto view=curve.spatialView();
+void* CreateCurveSmearCUDACache(){return new(std::nothrow) CUDAPathCache;}
+void DestroyCurveSmearCUDACache(void* cache){delete static_cast<CUDAPathCache*>(cache);}
+bool GetCurveSmearCUDACacheStats(void* cache,CUDACacheStats& stats){
+ auto* c=static_cast<CUDAPathCache*>(cache);if(!c)return false;
+ stats.renders=c->renders.load(std::memory_order_relaxed);stats.geometry_uploads=c->geometry_uploads.load(std::memory_order_relaxed);stats.cache_hits=c->cache_hits.load(std::memory_order_relaxed);stats.allocations=c->allocations.load(std::memory_order_relaxed);
+ std::lock_guard<std::mutex> lock(c->slots_mutex);stats.stream_slots=static_cast<unsigned int>(c->slots.size());return true;
+}
+
+bool RenderCurveSmearCUDA(const smear::Curve& curve,const smear::Settings& settings,const CUDAImage& source,const CUDAImage* matte,CUDAImage& output,double scale_x,double scale_y,void* stream_pointer,void* cache_pointer){
+ cudaStream_t stream=static_cast<cudaStream_t>(stream_pointer);auto view=curve.spatialView();auto* cache=static_cast<CUDAPathCache*>(cache_pointer);
+ CacheSlot temporary;std::shared_ptr<CacheSlot> shared_slot;CacheSlot* slot=&temporary;
+ if(cache){
+  cache->renders.fetch_add(1,std::memory_order_relaxed);std::lock_guard<std::mutex> lock(cache->slots_mutex);auto found=cache->slots.find(stream_pointer);
+  if(found!=cache->slots.end())shared_slot=found->second;
+  else if(cache->slots.size()<MAX_STREAM_SLOTS){shared_slot=std::make_shared<CacheSlot>();cache->slots.emplace(stream_pointer,shared_slot);}
+  if(shared_slot)slot=shared_slot.get();
+ }
+ std::lock_guard<std::mutex> slot_lock(slot->mutex);
  std::vector<GPUSegment> host_segments;host_segments.reserve(curve.segments.size());for(const auto& g:curve.segments)host_segments.push_back({g.p.x,g.p.y,g.dx,g.dy,g.len,g.s});
- if(!allocateAndCopy(reinterpret_cast<void**>(&device.segments),host_segments.data(),host_segments.size()*sizeof(GPUSegment),stream))return false;
- if(view.ready&&!allocateAndCopy(reinterpret_cast<void**>(&device.offsets),view.offsets,view.offset_count*sizeof(std::uint32_t),stream)){cudaFree(device.segments);return false;}
- if(view.ready&&!allocateAndCopy(reinterpret_cast<void**>(&device.indices),view.indices,view.index_count*sizeof(std::uint32_t),stream)){cudaFree(device.offsets);cudaFree(device.segments);return false;}
+ bool uploaded=false;auto* allocation_count=cache?&cache->allocations:nullptr;
+ if(!updateBuffer(slot->segments,slot->host_segments,host_segments.data(),host_segments.size(),stream,allocation_count,uploaded)||
+    (view.ready&&!updateBuffer(slot->offsets,slot->host_offsets,view.offsets,view.offset_count,stream,allocation_count,uploaded))||
+    (view.ready&&!updateBuffer(slot->indices,slot->host_indices,view.indices,view.index_count,stream,allocation_count,uploaded))){slot->invalidate();return false;}
+ if(cache){if(uploaded)cache->geometry_uploads.fetch_add(1,std::memory_order_relaxed);else cache->cache_hits.fetch_add(1,std::memory_order_relaxed);}
  GPUSettings c{};c.amount=settings.amount;c.radius=settings.radius;c.feather=settings.feather;c.streak=settings.streak;c.frequency=settings.frequency;c.original=settings.original;c.seed=settings.seed;c.length=curve.length;c.left=curve.left;c.top=curve.top;c.right=curve.right;c.bottom=curve.bottom;c.reverse=settings.reverse;c.preview=settings.preview;c.flat=settings.flat;c.nearest=settings.nearest;c.matte_alpha=settings.matte_alpha;c.segment_count=static_cast<int>(curve.segments.size());c.index_ready=view.ready;c.index_radius=view.radius;c.index_origin_x=view.origin_x;c.index_origin_y=view.origin_y;c.index_columns=view.columns;c.index_rows=view.rows;for(int i=0;i<=256;i++)c.profile[i]=settings.profile_lut[i];
  CUDAImage empty{};const CUDAImage& mat=matte?*matte:empty;dim3 block(16,16),grid((output.width+15)/16,(output.height+15)/16);
- curveSmearKernel<<<grid,block,0,stream>>>(static_cast<const float4*>(source.data),static_cast<float4*>(output.data),matte?static_cast<const float4*>(matte->data):nullptr,source,output,mat,c,device.segments,device.offsets,device.indices,scale_x,scale_y);
+ curveSmearKernel<<<grid,block,0,stream>>>(static_cast<const float4*>(source.data),static_cast<float4*>(output.data),matte?static_cast<const float4*>(matte->data):nullptr,source,output,mat,c,static_cast<const GPUSegment*>(slot->segments.data),view.ready?static_cast<const std::uint32_t*>(slot->offsets.data):nullptr,view.ready?static_cast<const std::uint32_t*>(slot->indices.data):nullptr,scale_x,scale_y);
  bool ok=cudaPeekAtLastError()==cudaSuccess&&cudaStreamSynchronize(stream)==cudaSuccess;
- cudaFree(device.indices);cudaFree(device.offsets);cudaFree(device.segments);return ok;
+ if(!ok)slot->invalidate();return ok;
 }
 
-bool RenderCurveSmearCUDAHost(const smear::Curve& curve,const smear::Settings& settings,const CUDAImage& source,const CUDAImage* matte,CUDAImage& output,double scale_x,double scale_y){
+bool RenderCurveSmearCUDAHost(const smear::Curve& curve,const smear::Settings& settings,const CUDAImage& source,const CUDAImage* matte,CUDAImage& output,double scale_x,double scale_y,void* cache){
  void *device_source=nullptr,*device_matte=nullptr,*device_output=nullptr;size_t source_bytes=static_cast<size_t>(source.pitch)*source.height*16,output_bytes=static_cast<size_t>(output.pitch)*output.height*16,matte_bytes=matte?static_cast<size_t>(matte->pitch)*matte->height*16:0;
  if(cudaMalloc(&device_source,source_bytes)!=cudaSuccess||cudaMalloc(&device_output,output_bytes)!=cudaSuccess){cudaFree(device_output);cudaFree(device_source);return false;}
  if(cudaMemcpy(device_source,source.data,source_bytes,cudaMemcpyHostToDevice)!=cudaSuccess){cudaFree(device_output);cudaFree(device_source);return false;}
  if(matte&&(cudaMalloc(&device_matte,matte_bytes)!=cudaSuccess||cudaMemcpy(device_matte,matte->data,matte_bytes,cudaMemcpyHostToDevice)!=cudaSuccess)){cudaFree(device_matte);cudaFree(device_output);cudaFree(device_source);return false;}
  CUDAImage gpu_source=source,gpu_output=output,gpu_matte{};gpu_source.data=device_source;gpu_output.data=device_output;if(matte){gpu_matte=*matte;gpu_matte.data=device_matte;}
- bool ok=RenderCurveSmearCUDA(curve,settings,gpu_source,matte?&gpu_matte:nullptr,gpu_output,scale_x,scale_y,nullptr)&&cudaMemcpy(output.data,device_output,output_bytes,cudaMemcpyDeviceToHost)==cudaSuccess;
+ bool ok=RenderCurveSmearCUDA(curve,settings,gpu_source,matte?&gpu_matte:nullptr,gpu_output,scale_x,scale_y,nullptr,cache)&&cudaMemcpy(output.data,device_output,output_bytes,cudaMemcpyDeviceToHost)==cudaSuccess;
  cudaFree(device_matte);cudaFree(device_output);cudaFree(device_source);return ok;
 }
