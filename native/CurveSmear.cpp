@@ -29,7 +29,7 @@ constexpr A_long FLAGS2=PF_OutFlag2_SUPPORTS_SMART_RENDER|PF_OutFlag2_FLOAT_COLO
  |PF_OutFlag2_SUPPORTS_GPU_RENDER_F32
 #endif
  ;
-constexpr A_u_long VERSION=PF_VERSION(0,1,11,PF_Stage_DEVELOP,5);
+constexpr A_u_long VERSION=PF_VERSION(1,0,0,PF_Stage_RELEASE,1);
 static void check(PF_Err e){if(e)throw e;}
 static A_char* paramName(PF_ParamDef& d){
 #if PF_PLUG_IN_SUBVERS >= 29
@@ -234,13 +234,13 @@ static PF_Err gpuRender(PF_InData* in,PF_OutData* out,PF_SmartRenderExtra* extra
 #endif
 extern "C" DllExport PF_Err PluginDataEntryFunction2(PF_PluginDataPtr ptr,PF_PluginDataCB2 callback,SPBasicSuite*,const char*,const char*){
  PF_Err result=PF_Err_NONE;
- PF_REGISTER_EFFECT_EXT2(ptr,callback,"CurveSmear","Siosi CurveSmear","CurveSmear",AE_RESERVED_INFO,"EffectMain","");
+ PF_REGISTER_EFFECT_EXT2(ptr,callback,"CurveSmear","Iken_O CurveSmear","Iken_Effects",AE_RESERVED_INFO,"EffectMain","");
  return result;
 }
 extern "C" DllExport PF_Err EffectMain(PF_Cmd cmd,PF_InData* in,PF_OutData* out,PF_ParamDef* params[],PF_LayerDef* output,void* extra){
  try {
   switch(cmd){
-   case PF_Cmd_ABOUT:std::strcpy(out->return_msg,"CurveSmear 0.1.11\rCUDA GPU Smart Render with cached path data and CPU fallback.");break;
+   case PF_Cmd_ABOUT:std::strcpy(out->return_msg,"CurveSmear 1.0.0\rCUDA GPU Smart Render with cached path data and CPU fallback.");break;
    case PF_Cmd_GLOBAL_SETUP:out->my_version=VERSION;out->out_flags=FLAGS;out->out_flags2=FLAGS2;break;
    case PF_Cmd_PARAMS_SETUP:return setup(in,out);
    case PF_Cmd_ARBITRARY_CALLBACK:return HandleArbitrary(in,out,static_cast<PF_ArbParamsExtra*>(extra));

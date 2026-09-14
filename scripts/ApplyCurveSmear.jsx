@@ -6,7 +6,7 @@
     }
     var layer = comp.selectedLayers[0];
     var effects = layer.property('ADBE Effect Parade');
-    if (!effects || !effects.canAddProperty('Siosi CurveSmear')) {
+    if (!effects || !effects.canAddProperty('Iken_O CurveSmear')) {
         alert('CurveSmear is not installed. Install CurveSmear.aex and restart After Effects.'); return;
     }
     var masks = layer.property('ADBE Mask Parade'), maskIndex = 0;
@@ -28,7 +28,7 @@
             shape.outTangents=[[w*.15,-h*.12],[0,0]];
             mask.property('ADBE Mask Shape').setValue(shape);maskIndex=mask.propertyIndex;
         } else { masks.property(maskIndex).maskMode=MaskMode.NONE; }
-        var fx=effects.addProperty('Siosi CurveSmear');fx.property(1).setValue(maskIndex);
+        var fx=effects.addProperty('Iken_O CurveSmear');fx.property(1).setValue(maskIndex);
         fx.property(2).setValue(Math.min(layer.width,layer.height)*.35);
         fx.property(3).setValue(Math.min(layer.width,layer.height)*.10);
         masks.property(maskIndex).property('ADBE Mask Shape').selected=true;

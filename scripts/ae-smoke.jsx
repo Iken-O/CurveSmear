@@ -35,7 +35,7 @@
         shape.outTangents = [[95,-30],[0,0]];
         shape.closed = false;
         mask.property('ADBE Mask Shape').setValue(shape);
-        var fx = layer.property('ADBE Effect Parade').addProperty('Siosi CurveSmear');
+        var fx = layer.property('ADBE Effect Parade').addProperty('Iken_O CurveSmear');
         if (!fx) throw new Error('CurveSmear effect not found');
         // Render once in the exact state users see immediately after adding the effect.
         // No flow path is selected yet; this must be a clean pass-through.
