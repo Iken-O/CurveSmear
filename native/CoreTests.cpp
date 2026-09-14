@@ -16,11 +16,14 @@ static Data testData(){
  return d;
 }
 template<class P> static void invariants(){
- Image<P> input(800,520),output(800,520);using C=decltype(P{}.alpha);
+ Image<P> input(800,520),output(800,520),indexedOutput(800,520);using C=decltype(P{}.alpha);
  const double max=std::is_floating_point_v<C>?1.:sizeof(C)==1?255.:32768.;
  for(int y=0;y<input.h;y++)for(int x=0;x<input.w;x++){auto& p=input.at(x,y);p.alpha=channel<C>(max);p.red=channel<C>(max*x/800);p.green=channel<C>(max*y/520);p.blue=channel<C>(max*.3);}
  PF_InData in{};in.downsample_x={1,1};in.downsample_y={1,1};in.inter.abort=noAbort;
  auto d=testData();assert(renderPixels<P>(&in,&input.world,&output.world,d,true)==0);
+ auto indexed=d;indexed.curve.prepareSpatialIndex(indexed.settings.radius);assert(indexed.curve.spatialIndexReady());assert(indexed.curve.spatialCellCount()>0);assert(indexed.curve.spatialCandidateReferences()>0);
+ assert(renderPixels<P>(&in,&input.world,&indexedOutput.world,indexed,true)==0);
+ assert(std::memcmp(output.pixels.data(),indexedOutput.pixels.data(),output.pixels.size()*sizeof(P))==0);d=std::move(indexed);
  int changed=0;for(int y=0;y<input.h;y++)for(int x=0;x<input.w;x++){bool equal=std::memcmp(&input.at(x,y),&output.at(x,y),sizeof(P))==0;auto m=d.curve.map({double(x),double(y)},d.settings);if(!m.influence)assert(equal);if(!equal)changed++;}assert(changed>1000);
  d.settings.amount=0;renderPixels<P>(&in,&input.world,&output.world,d,true);
  for(int y=0;y<input.h;y++)for(int x=0;x<input.w;x++)assert(std::memcmp(&input.at(x,y),&output.at(x,y),sizeof(P))==0);
@@ -38,16 +41,30 @@ template<class P> static void invariants(){
  Image<P> half(400,260),halfOut(400,260);for(int y=0;y<260;y++)for(int x=0;x<400;x++)half.at(x,y)=input.at(x*2,y*2);
  in.downsample_x={1,2};in.downsample_y={1,2};renderPixels<P>(&in,&half.world,&halfOut.world,d,true);
  for(int y=0;y<260;y++)for(int x=0;x<400;x++){if(!d.curve.map({double(x*2),double(y*2)},d.settings).influence)assert(std::memcmp(&half.at(x,y),&halfOut.at(x,y),sizeof(P))==0);}
- std::cout<<"PASS "<<sizeof(P)*8<<"-bit pixel: outside radius, zero, original, tiled output, cropped input, downsample\n";
+ std::cout<<"PASS "<<sizeof(P)*8<<"-bit pixel: exact spatial index, outside radius, zero, original, tiled output, cropped input, downsample\n";
+}
+static void spatialIndexMapping(){
+ auto reference=testData();
+ for(double radius:{1.,20.,65.,250.}){
+  reference.settings.radius=radius;auto indexed=reference;indexed.curve.prepareSpatialIndex(radius);assert(indexed.curve.spatialIndexReady());
+  for(int y=-80;y<=600;y+=2)for(int x=-80;x<=880;x+=2){auto a=reference.curve.map({double(x),double(y)},reference.settings),b=indexed.curve.map({double(x),double(y)},indexed.settings);assert(a.source.x==b.source.x&&a.source.y==b.source.y&&a.influence==b.influence&&a.profile_position==b.profile_position);}
+  // A radius mismatch must safely fall back to the full search.
+  indexed.settings.radius=radius+3;reference.settings.radius=radius+3;auto a=reference.curve.map({470,235},reference.settings),b=indexed.curve.map({470,235},indexed.settings);assert(a.source.x==b.source.x&&a.source.y==b.source.y&&a.influence==b.influence&&a.profile_position==b.profile_position);
+ }
+ // Candidate lists preserve segment order, including an exact crossing tie.
+ smear::Curve crossing;crossing.add({0,0},{100,100});crossing.add({0,100},{100,0});smear::Settings settings;settings.radius=30;settings.feather=0;auto full=crossing.map({50,50},settings);crossing.prepareSpatialIndex(settings.radius);auto tiled=crossing.map({50,50},settings);assert(full.source.x==tiled.source.x&&full.source.y==tiled.source.y&&full.influence==tiled.influence);
+ crossing.add({100,0},{140,0});assert(!crossing.spatialIndexReady());
+ std::cout<<"PASS exhaustive spatial-index mapping, radius fallback, crossing order, mutation invalidation\n";
 }
 int main(int argc,char** argv){
  static_assert(SOURCE_MATTE==1&&MATTE_CHANNEL==2&&PATH==3&&PROFILE_GROUP==15&&PROFILE_GROUP_END==21&&LEGACY_INVERT_MATTE==22);
  static_assert(DISK_PATH==1&&DISK_PROFILE==13&&DISK_SOURCE_MATTE==18&&DISK_MATTE_CHANNEL==19&&DISK_LEGACY_INVERT_MATTE==20);
  invariants<PF_Pixel8>();invariants<PF_Pixel16>();invariants<PF_PixelFloat>();
+ spatialIndexMapping();
  Image<PF_PixelFloat> hdr(2,2);hdr.at(0,0)={1,4,-.5f,2};hdr.at(1,0)={0,0,0,0};
  auto sampleFloat=bilinear<PF_PixelFloat>(&hdr.world,.5,0,{},0);assert(sampleFloat.alpha==.5f&&sampleFloat.red==2&&sampleFloat.green==-.25f&&sampleFloat.blue==1);
  Image<PF_Pixel16> deep(2,2);deep.at(0,0)={32768,32768,0,0};auto q=bilinear<PF_Pixel16>(&deep.world,.5,0,{},0);assert(q.alpha==16384&&q.red==16384);
- assert(VERSION==47109);assert(FLAGS==0x02008000);assert(FLAGS2==0x08201400);
+ assert(VERSION==49157);assert(FLAGS==0x02008000);assert(FLAGS2==0x08201400);
  auto d=testData();auto a=d.curve.map({470,235},d.settings);d.settings.reverse=true;auto b=d.curve.map({470,235},d.settings);assert(a.source.x!=b.source.x);
  auto profile=smear::defaultProfile();for(double u:{0.,.25,.5,.75,1.})assert(smear::profileValue(profile,u)==1);
  profile.points[0].y=.01f;assert(std::abs(smear::profileValue(profile,0)-.01)<1e-6);assert(std::abs(smear::profileValue(profile,.5)-.505)<1e-6);assert(smear::profileValue(profile,1)==1);

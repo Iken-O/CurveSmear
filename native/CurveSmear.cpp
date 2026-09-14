@@ -21,7 +21,7 @@
 
 constexpr A_long FLAGS=PF_OutFlag_DEEP_COLOR_AWARE|PF_OutFlag_CUSTOM_UI;
 constexpr A_long FLAGS2=PF_OutFlag2_SUPPORTS_SMART_RENDER|PF_OutFlag2_FLOAT_COLOR_AWARE|PF_OutFlag2_I_MIX_GUID_DEPENDENCIES|PF_OutFlag2_SUPPORTS_THREADED_RENDERING;
-constexpr A_u_long VERSION=PF_VERSION(0,1,7,PF_Stage_DEVELOP,5);
+constexpr A_u_long VERSION=PF_VERSION(0,1,8,PF_Stage_DEVELOP,5);
 static void check(PF_Err e){if(e)throw e;}
 static A_char* paramName(PF_ParamDef& d){
 #if PF_PLUG_IN_SUBVERS >= 29
@@ -86,7 +86,8 @@ static Data readData(PF_InData* in,PF_OutData* out,PF_ParamDef* p[]){
  if(auto h=p[PROFILE]->u.arb_d.value){Suite<PF_HandleSuite1> handles(in,kPFHandleSuite,kPFHandleSuiteVersion1);auto profile=static_cast<const smear::ProfileData*>(handles->host_lock_handle(h));if(!profile)throw PF_Err_OUT_OF_MEMORY;s.profile=*profile;handles->host_unlock_handle(h);smear::sanitizeProfile(s.profile);}
  s.profile.smooth=p[PROFILE_SMOOTH]->u.bd.value?1u:0u;
  smear::prepareProfile(s);
- loadPath(in,out,p[PATH]->u.path_d.path_id,d.curve);return d;
+ loadPath(in,out,p[PATH]->u.path_d.path_id,d.curve);
+ d.curve.prepareSpatialIndex(s.radius);return d;
 }
 static PF_Err setup(PF_InData* in_data,PF_OutData* out_data){
  PF_ParamDef def{};
@@ -210,7 +211,7 @@ extern "C" DllExport PF_Err PluginDataEntryFunction2(PF_PluginDataPtr ptr,PF_Plu
 extern "C" DllExport PF_Err EffectMain(PF_Cmd cmd,PF_InData* in,PF_OutData* out,PF_ParamDef* params[],PF_LayerDef* output,void* extra){
  try {
   switch(cmd){
-   case PF_Cmd_ABOUT:std::strcpy(out->return_msg,"CurveSmear 0.1.7\rLocal curve-driven smear with an editable width profile and optional source matte.");break;
+   case PF_Cmd_ABOUT:std::strcpy(out->return_msg,"CurveSmear 0.1.8\rLocal curve-driven smear with an editable width profile and optional source matte.");break;
    case PF_Cmd_GLOBAL_SETUP:out->my_version=VERSION;out->out_flags=FLAGS;out->out_flags2=FLAGS2;break;
    case PF_Cmd_PARAMS_SETUP:return setup(in,out);
    case PF_Cmd_ARBITRARY_CALLBACK:return HandleArbitrary(in,out,static_cast<PF_ArbParamsExtra*>(extra));

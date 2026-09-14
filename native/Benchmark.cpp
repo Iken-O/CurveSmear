@@ -1,4 +1,4 @@
-// Standalone timings of the unchanged production renderer. No AE or disk I/O in timed regions.
+// Standalone timings of the production renderer. No AE or disk I/O in timed regions.
 // Diagnostic passes materialize intermediates; their times are NOT an additive profile of renderPixels.
 #include "CurveSmear.cpp"
 #include <chrono>
@@ -59,17 +59,19 @@ static smear::Mapping finish(const smear::Curve& curve,smear::Point p,const smea
  auto a=curve.frame(s,n),b=curve.frame(s+(c.reverse?shift:-shift),n);result.source={p.x+b.x-a.x,p.y+b.y-a.y};return result;
 }
 struct Case {const char* name;int kind;double radius;bool nearest,matte;int bpc;bool zero=false;};
-static void emit(std::ostream& file,const Case& c,const char* phase,size_t segments,size_t bbox,size_t affected,Stats s,int repeats){
- file<<c.name<<','<<c.bpc<<','<<c.radius<<','<<(c.nearest?"Nearest":"Linear")<<','<<c.matte<<','<<segments<<','<<bbox<<','<<affected<<','<<phase<<','<<repeats<<','<<s.first<<','<<s.median<<','<<s.p95<<'\n';file.flush();
+static void emit(std::ostream& file,const Case& c,const char* phase,size_t segments,size_t cells,size_t references,size_t bbox,size_t affected,Stats s,int repeats){
+ file<<c.name<<','<<c.bpc<<','<<c.radius<<','<<(c.nearest?"Nearest":"Linear")<<','<<c.matte<<','<<segments<<','<<cells<<','<<references<<','<<bbox<<','<<affected<<','<<phase<<','<<repeats<<','<<s.first<<','<<s.median<<','<<s.p95<<'\n';file.flush();
 }
 template<class P> static void run(const Case& c,int repeats,std::ostream& file){
  Image<P> input,matte,output,replayed;using Channel=decltype(P{}.alpha);double max=std::is_floating_point_v<Channel>?1.:sizeof(Channel)==1?255.:32768.;
  for(int y=0;y<H;y++)for(int x=0;x<W;x++){auto i=y*W+x;auto& p=input.pixels[i];double a=(x%137<100)?1.:.5;p={channel<Channel>(max*a),channel<Channel>(max*a*(x%256)/255.),channel<Channel>(max*a*(y%256)/255.),channel<Channel>(max*a*.25)};double m=(x/120)%2?1.:0;matte.pixels[i]={channel<Channel>(max),channel<Channel>(max*m),channel<Channel>(max*m),channel<Channel>(max*m)};}
  Data d;d.curve=makeCurve(c.kind);d.settings.radius=c.radius;d.settings.amount=c.zero?0:250;d.settings.nearest=c.nearest;d.settings.flat=true;smear::prepareProfile(d.settings);
+ auto indexPreparation=measure([&](){d.curve.clearSpatialIndex();d.curve.prepareSpatialIndex(c.radius);observed=static_cast<double>(d.curve.spatialCandidateReferences());},repeats);
+ size_t cells=d.curve.spatialCellCount(),references=d.curve.spatialCandidateReferences();if(!d.curve.spatialIndexReady())throw std::runtime_error("Spatial index was not prepared");
  PF_InData in{};in.downsample_x={1,1};in.downsample_y={1,1};in.inter.abort=noAbort;const auto* mw=c.matte?&matte.world:nullptr;
  auto total=measure([&](){if(renderPixels<P>(&in,&input.world,&output.world,d,true,mw))throw std::runtime_error("render failed");observed=output.pixels[W*H/2].red;},repeats);
  size_t bbox=0,affected=0;for(int y=0;y<H;y++)for(int x=0;x<W;x++)if(x>=d.curve.left-c.radius&&x<=d.curve.right+c.radius&&y>=d.curve.top-c.radius&&y<=d.curve.bottom+c.radius)bbox++;
- if(c.zero){emit(file,c,"production_render",d.curve.segments.size(),bbox,0,total,repeats);std::cout<<c.name<<": "<<total.median<<" ms\n"<<std::flush;return;}
+ if(c.zero){emit(file,c,"production_render",d.curve.segments.size(),cells,references,bbox,0,total,repeats);emit(file,c,"spatial_prepare",d.curve.segments.size(),cells,references,bbox,0,indexPreparation,repeats);std::cout<<c.name<<": "<<total.median<<" ms\n"<<std::flush;return;}
  std::vector<Closest> closest(W*H);std::vector<smear::Mapping> mappings(W*H);
  auto searchTime=measure([&](){for(int y=0;y<H;y++)for(int x=0;x<W;x++)closest[y*W+x]=search(d.curve,{double(x),double(y)},d.settings);observed=closest[W*H/2].best;},repeats);
  auto finishTime=measure([&](){for(int y=0;y<H;y++)for(int x=0;x<W;x++)mappings[y*W+x]=finish(d.curve,{double(x),double(y)},d.settings,closest[y*W+x]);observed=mappings[W*H/2].source.x;},repeats);
@@ -79,16 +81,17 @@ template<class P> static void run(const Case& c,int repeats,std::ostream& file){
  auto sampleTime=measure([&](){for(int y=0;y<H;y++)for(int x=0;x<W;x++){int i=y*W+x;auto orig=input.pixels[i];replayed.pixels[i]=orig;const auto& m=mappings[i];if(m.influence<=0)continue;if(m.source.x!=x||m.source.y!=y){double coverage=matteCoverage<P>(mw,m.source.x,m.source.y,c.nearest,false),keep=1-(1-d.settings.original)*coverage;replayed.pixels[i]=c.nearest?nearest<P>(&input.world,m.source.x,m.source.y,orig,keep):bilinear<P>(&input.world,m.source.x,m.source.y,orig,keep);}}observed=replayed.pixels[W*H/2].red;},repeats);
  if(std::memcmp(output.pixels.data(),replayed.pixels.data(),W*H*sizeof(P)))throw std::runtime_error("Diagnostic pixels differ from production");
  auto preparation=measure([&](){auto curve=makeCurve(c.kind);auto settings=d.settings;smear::prepareProfile(settings);observed=curve.length+settings.profile_lut[128];},repeats);
- emit(file,c,"production_render",d.curve.segments.size(),bbox,affected,total,repeats);
- emit(file,c,"diagnostic_search",d.curve.segments.size(),bbox,affected,searchTime,repeats);
- emit(file,c,"diagnostic_finish",d.curve.segments.size(),bbox,affected,finishTime,repeats);
- emit(file,c,"diagnostic_sample",d.curve.segments.size(),bbox,affected,sampleTime,repeats);
- emit(file,c,"synthetic_prepare",d.curve.segments.size(),bbox,affected,preparation,repeats);
+ emit(file,c,"production_render",d.curve.segments.size(),cells,references,bbox,affected,total,repeats);
+ emit(file,c,"spatial_prepare",d.curve.segments.size(),cells,references,bbox,affected,indexPreparation,repeats);
+ emit(file,c,"diagnostic_full_search",d.curve.segments.size(),cells,references,bbox,affected,searchTime,repeats);
+ emit(file,c,"diagnostic_finish",d.curve.segments.size(),cells,references,bbox,affected,finishTime,repeats);
+ emit(file,c,"diagnostic_sample",d.curve.segments.size(),cells,references,bbox,affected,sampleTime,repeats);
+ emit(file,c,"synthetic_prepare",d.curve.segments.size(),cells,references,bbox,affected,preparation,repeats);
  std::cout<<c.name<<": total="<<total.median<<" search="<<searchTime.median<<" finish="<<finishTime.median<<" sample="<<sampleTime.median<<" ms; exact diagnostic equality PASS\n"<<std::flush;
 }
 int main(int argc,char** argv){
  try{if(argc>3){int cpu=std::atoi(argv[3]);if(cpu<0||cpu>=64||!SetThreadAffinityMask(GetCurrentThread(),DWORD_PTR(1)<<cpu))throw std::runtime_error("CPU affinity failed");std::cout<<"Benchmark thread pinned to logical CPU "<<cpu<<'\n';}
- int repeats=argc>2?std::max(3,std::atoi(argv[2])):9;std::ofstream file(argc>1?argv[1]:"benchmark.csv");if(!file)throw std::runtime_error("Cannot create CSV");file<<std::setprecision(9)<<"case,bpc,radius,sampling,matte,segments,bbox_pixels,influenced_pixels,phase,repeats,first_ms,median_ms,p95_ms\n";
+ int repeats=argc>2?std::max(3,std::atoi(argv[2])):9;std::ofstream file(argc>1?argv[1]:"benchmark.csv");if(!file)throw std::runtime_error("Cannot create CSV");file<<std::setprecision(9)<<"case,bpc,radius,sampling,matte,segments,grid_cells,candidate_references,bbox_pixels,influenced_pixels,phase,repeats,first_ms,median_ms,p95_ms\n";
  const Case cases[]={
  {"zero_8",0,65,true,false,8,true},
  {"short_8_nearest",0,65,true,false,8},

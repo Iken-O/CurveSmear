@@ -1,4 +1,4 @@
-# CurveSmear 0.1.7
+# CurveSmear 0.1.8
 
 開いたAEマスクパスを流れとして使い、パスの周囲だけをカーブに沿って引き伸ばすWindows用After Effectsエフェクトです。
 
@@ -68,5 +68,5 @@ python native/build.py --tests --output CurveSmear.aex
 別のSDKを使う場合は`--sdk`でAfterEffectsSDKディレクトリを指定します。
 
 ```powershell
-python native/build.py --sdk "C:\SDK\Adobe\AE_SDK\AfterEffectsSDK_25.6_61_win\ae25.6_61.64bit.AfterEffectsSDK" --tests --output CurveSmear-0.1.7-sdk25.6.aex
+python native/build.py --sdk "C:\SDK\Adobe\AE_SDK\AfterEffectsSDK_25.6_61_win\ae25.6_61.64bit.AfterEffectsSDK" --tests --output CurveSmear-0.1.8-sdk25.6.aex
 ```
