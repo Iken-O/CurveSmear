@@ -41,7 +41,7 @@ GitHub Releasesから取得した`CurveSmear.aex`、または自分でビルド�
 
 `Source Matte`と`Matte Channel`はエフェクトの先頭にあります。`Width Profile`はグラフ、`Smooth`、横1列の3操作ボタンを同じ折りたたみグループにまとめています。
 
-倍率グラフはカットごとの固定設定で、キーフレームには対応していません。新規エフェクトの初期値は`Flat`と`Nearest`です。0.1.2以前のプロジェクトを開いた場合は、従来結果を保つため`Round`と`Linear`になります。
+倍率グラフはカットごとの固定設定で、キーフレームには対応していません。新規エフェクトの初期値は`Flat`と`Nearest`です。
 
 `Source Matte`は変形後に参照される元画像座標で評価します。白い元ピクセルはsmearへ運ばれ、黒い元ピクセルを参照する場所は現在位置の画像を維持します。CurveとRadiusは引き続きsmearが現れ得る領域を決めるため、Source Matteの輪郭より外へ対象を伸ばせます。マットの補間は`Sampling`に従います。
 
@@ -54,19 +54,3 @@ GitHub Releasesから取得した`CurveSmear.aex`、または自分でビルド�
 - PNGとEXRを含む、AEがデコードしたRGBAレイヤーを処理
 - 1エフェクトにつき開いたマスクパス1本
 - 出力領域はレイヤー境界内
-
-マルチチャンネルEXRでは、必要なパスをAE側で抽出してからCurveSmearを適用してください。
-
-## ビルド
-
-MSVCのDeveloper PowerShellで実行します。
-
-```powershell
-python native/build.py --cuda --tests --output CurveSmear.aex
-```
-
-別のSDKを使う場合は`--sdk`でAfterEffectsSDKディレクトリを指定します。
-
-```powershell
-python native/build.py --cuda --sdk "C:\SDK\Adobe\AE_SDK\AfterEffectsSDK_25.6_61_win\ae25.6_61.64bit.AfterEffectsSDK" --tests --output CurveSmear-0.1.10-cuda-sdk25.6.aex
-```
