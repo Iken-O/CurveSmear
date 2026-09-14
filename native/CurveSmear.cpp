@@ -8,6 +8,10 @@
 #include "AE_EffectCB.h"
 #include "AE_EffectCBSuites.h"
 #include "AE_EffectSuites.h"
+#ifdef CURVESMEAR_CUDA
+#include "AE_EffectGPUSuites.h"
+#include "CurveSmearCUDA.h"
+#endif
 #include "AE_Macros.h"
 #include "AE_PluginData.h"
 #include "Param_Utils.h"
@@ -20,8 +24,12 @@
 #include <type_traits>
 
 constexpr A_long FLAGS=PF_OutFlag_DEEP_COLOR_AWARE|PF_OutFlag_CUSTOM_UI;
-constexpr A_long FLAGS2=PF_OutFlag2_SUPPORTS_SMART_RENDER|PF_OutFlag2_FLOAT_COLOR_AWARE|PF_OutFlag2_I_MIX_GUID_DEPENDENCIES|PF_OutFlag2_SUPPORTS_THREADED_RENDERING;
-constexpr A_u_long VERSION=PF_VERSION(0,1,8,PF_Stage_DEVELOP,5);
+constexpr A_long FLAGS2=PF_OutFlag2_SUPPORTS_SMART_RENDER|PF_OutFlag2_FLOAT_COLOR_AWARE|PF_OutFlag2_I_MIX_GUID_DEPENDENCIES|PF_OutFlag2_SUPPORTS_THREADED_RENDERING
+#ifdef CURVESMEAR_CUDA
+ |PF_OutFlag2_SUPPORTS_GPU_RENDER_F32
+#endif
+ ;
+constexpr A_u_long VERSION=PF_VERSION(0,1,9,PF_Stage_DEVELOP,5);
 static void check(PF_Err e){if(e)throw e;}
 static A_char* paramName(PF_ParamDef& d){
 #if PF_PLUG_IN_SUBVERS >= 29
@@ -126,6 +134,9 @@ static void deleteData(void* p){delete static_cast<Data*>(p);}
 static PF_Err preRender(PF_InData* in,PF_OutData* out,PF_PreRenderExtra* extra){
  Params params(in);std::array<PF_ParamDef*,COUNT> p{};for(int k=1;k<COUNT;k++)p[k]=&params.p[k];
  auto d=std::make_unique<Data>(readData(in,out,p.data()));
+#ifdef CURVESMEAR_CUDA
+ extra->output->flags|=PF_RenderOutputFlag_GPU_RENDER_POSSIBLE;
+#endif
  // Path geometry participates in the render cache, including animation of None masks.
  // I_MIX_GUID_DEPENDENCIES requires at least one mix call on every pre-render,
  // including the initial state before a mask has been selected.
@@ -203,6 +214,24 @@ static PF_Err render(PF_InData* in,PF_EffectWorld* input,PF_EffectWorld* output,
  Suite<PF_WorldSuite2> world(in,kPFWorldSuite,kPFWorldSuiteVersion2);PF_PixelFormat format;check(world->PF_GetPixelFormat(output,&format));
  switch(format){case PF_PixelFormat_ARGB32:return renderPixels<PF_Pixel8>(in,input,output,d,smart,matte);case PF_PixelFormat_ARGB64:return renderPixels<PF_Pixel16>(in,input,output,d,smart,matte);case PF_PixelFormat_ARGB128:return renderPixels<PF_PixelFloat>(in,input,output,d,smart,matte);default:return PF_Err_BAD_CALLBACK_PARAM;}
 }
+#ifdef CURVESMEAR_CUDA
+static PF_Err gpuDeviceSetup(PF_OutData* out,PF_GPUDeviceSetupExtra* extra){
+ if(extra&&extra->input&&extra->input->what_gpu==PF_GPU_Framework_CUDA)out->out_flags2|=PF_OutFlag2_SUPPORTS_GPU_RENDER_F32;
+ return PF_Err_NONE;
+}
+static PF_Err gpuRender(PF_InData* in,PF_OutData* out,PF_SmartRenderExtra* extra){
+ (void)out;
+ if(!extra||!extra->input||extra->input->what_gpu!=PF_GPU_Framework_CUDA)return PF_Err_UNRECOGNIZED_PARAM_TYPE;
+ PF_EffectWorld *input=nullptr,*matte=nullptr,*dest=nullptr;check(extra->cb->checkout_layer_pixels(in->effect_ref,0,&input));check(extra->cb->checkout_layer_pixels(in->effect_ref,SOURCE_MATTE,&matte));check(extra->cb->checkout_output(in->effect_ref,&dest));
+ auto data=static_cast<const Data*>(extra->input->pre_render_data);if(!data||!input||!dest)return PF_Err_BAD_CALLBACK_PARAM;
+ Suite<PF_WorldSuite2> worlds(in,kPFWorldSuite,kPFWorldSuiteVersion2);PF_PixelFormat format=PF_PixelFormat_INVALID;check(worlds->PF_GetPixelFormat(input,&format));if(format!=PF_PixelFormat_GPU_BGRA128)return PF_Err_UNRECOGNIZED_PARAM_TYPE;
+ Suite<PF_GPUDeviceSuite1> devices(in,kPFGPUDeviceSuite,kPFGPUDeviceSuiteVersion1);PF_GPUDeviceInfo info{};check(devices->GetDeviceInfo(in->effect_ref,extra->input->device_index,&info));
+ void *source_memory=nullptr,*matte_memory=nullptr,*dest_memory=nullptr;check(devices->GetGPUWorldData(in->effect_ref,input,&source_memory));check(devices->GetGPUWorldData(in->effect_ref,dest,&dest_memory));if(matte)check(devices->GetGPUWorldData(in->effect_ref,matte,&matte_memory));
+ CUDAImage source{source_memory,input->width,input->height,input->rowbytes/16,input->origin_x,input->origin_y};CUDAImage output{dest_memory,dest->width,dest->height,dest->rowbytes/16,dest->origin_x,dest->origin_y};CUDAImage matte_image{matte_memory,matte?matte->width:0,matte?matte->height:0,matte?matte->rowbytes/16:0,matte?matte->origin_x:0,matte?matte->origin_y:0};
+ double sx=double(in->downsample_x.num)/in->downsample_x.den,sy=double(in->downsample_y.num)/in->downsample_y.den;
+ return RenderCurveSmearCUDA(data->curve,data->settings,source,matte?&matte_image:nullptr,output,sx,sy,info.command_queuePV)?PF_Err_NONE:PF_Err_INTERNAL_STRUCT_DAMAGED;
+}
+#endif
 extern "C" DllExport PF_Err PluginDataEntryFunction2(PF_PluginDataPtr ptr,PF_PluginDataCB2 callback,SPBasicSuite*,const char*,const char*){
  PF_Err result=PF_Err_NONE;
  PF_REGISTER_EFFECT_EXT2(ptr,callback,"CurveSmear","Siosi CurveSmear","CurveSmear",AE_RESERVED_INFO,"EffectMain","");
@@ -211,14 +240,21 @@ extern "C" DllExport PF_Err PluginDataEntryFunction2(PF_PluginDataPtr ptr,PF_Plu
 extern "C" DllExport PF_Err EffectMain(PF_Cmd cmd,PF_InData* in,PF_OutData* out,PF_ParamDef* params[],PF_LayerDef* output,void* extra){
  try {
   switch(cmd){
-   case PF_Cmd_ABOUT:std::strcpy(out->return_msg,"CurveSmear 0.1.8\rLocal curve-driven smear with an editable width profile and optional source matte.");break;
+   case PF_Cmd_ABOUT:std::strcpy(out->return_msg,"CurveSmear 0.1.9\rCUDA GPU Smart Render with CPU fallback.");break;
    case PF_Cmd_GLOBAL_SETUP:out->my_version=VERSION;out->out_flags=FLAGS;out->out_flags2=FLAGS2;break;
    case PF_Cmd_PARAMS_SETUP:return setup(in,out);
    case PF_Cmd_ARBITRARY_CALLBACK:return HandleArbitrary(in,out,static_cast<PF_ArbParamsExtra*>(extra));
    case PF_Cmd_EVENT:return HandleProfileEvent(in,out,params,static_cast<PF_EventExtra*>(extra));
    case PF_Cmd_USER_CHANGED_PARAM:return HandleProfileButton(in,out,params,static_cast<PF_UserChangedParamExtra*>(extra));
+#ifdef CURVESMEAR_CUDA
+   case PF_Cmd_GPU_DEVICE_SETUP:return gpuDeviceSetup(out,static_cast<PF_GPUDeviceSetupExtra*>(extra));
+   case PF_Cmd_GPU_DEVICE_SETDOWN:return PF_Err_NONE;
+#endif
    case PF_Cmd_SMART_PRE_RENDER:return preRender(in,out,static_cast<PF_PreRenderExtra*>(extra));
    case PF_Cmd_SMART_RENDER:{auto e=static_cast<PF_SmartRenderExtra*>(extra);PF_EffectWorld *input=nullptr,*matte=nullptr,*dest=nullptr;check(e->cb->checkout_layer_pixels(in->effect_ref,0,&input));check(e->cb->checkout_layer_pixels(in->effect_ref,SOURCE_MATTE,&matte));check(e->cb->checkout_output(in->effect_ref,&dest));auto d=static_cast<const Data*>(e->input->pre_render_data);if(!d||!input||!dest)return PF_Err_BAD_CALLBACK_PARAM;return render(in,input,dest,*d,true,matte);}
+#ifdef CURVESMEAR_CUDA
+   case PF_Cmd_SMART_RENDER_GPU:return gpuRender(in,out,static_cast<PF_SmartRenderExtra*>(extra));
+#endif
    case PF_Cmd_RENDER:{auto d=readData(in,out,params);PF_ParamDef matte{};check(PF_CHECKOUT_PARAM(in,SOURCE_MATTE,in->current_time,in->time_step,in->time_scale,&matte));PF_Err result=PF_Err_NONE;try{result=render(in,&params[0]->u.ld,output,d,false,matte.u.ld.data?&matte.u.ld:nullptr);}catch(...){PF_CHECKIN_PARAM(in,&matte);throw;}PF_CHECKIN_PARAM(in,&matte);return result;}
    default:break;
   }

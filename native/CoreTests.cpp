@@ -56,15 +56,33 @@ static void spatialIndexMapping(){
  crossing.add({100,0},{140,0});assert(!crossing.spatialIndexReady());
  std::cout<<"PASS exhaustive spatial-index mapping, radius fallback, crossing order, mutation invalidation\n";
 }
+#ifdef CURVESMEAR_CUDA
+static void cudaPixels(){
+ constexpr int width=800,height=520,stride=803;Image<PF_PixelFloat> input(width,height),matte(width,height),cpu(width,height);std::vector<float> source(stride*height*4),matteBGRA(stride*height*4),gpu(stride*height*4);
+ for(int y=0;y<height;y++)for(int x=0;x<width;x++){auto& p=input.at(x,y);p.alpha=.35f+.65f*(x%31)/30.f;p.red=p.alpha*(x%251)/250.f;p.green=p.alpha*(y%239)/238.f;p.blue=p.alpha*.37f;auto& m=matte.at(x,y);m.alpha=(x%173)/172.f;m.red=m.green=m.blue=((x/47)%2)?1.f:0.f;auto at=(y*stride+x)*4;source[at]=p.blue;source[at+1]=p.green;source[at+2]=p.red;source[at+3]=p.alpha;matteBGRA[at]=m.blue;matteBGRA[at+1]=m.green;matteBGRA[at+2]=m.red;matteBGRA[at+3]=m.alpha;}
+ PF_InData in{};in.downsample_x={1,1};in.downsample_y={1,1};in.inter.abort=noAbort;auto d=testData();smear::prepareProfile(d.settings);d.curve.prepareSpatialIndex(d.settings.radius);CUDAImage src{source.data(),width,height,stride,0,0},dst{gpu.data(),width,height,stride,0,0},gpuMatte{matteBGRA.data(),width,height,stride,0,0};
+ auto compare=[&](const char* name,bool use_matte){assert(renderPixels<PF_PixelFloat>(&in,&input.world,&cpu.world,d,true,use_matte?&matte.world:nullptr)==0);std::fill(gpu.begin(),gpu.end(),0.f);assert(RenderCurveSmearCUDAHost(d.curve,d.settings,src,use_matte?&gpuMatte:nullptr,dst));double max_error=0;size_t different=0;for(int y=0;y<height;y++)for(int x=0;x<width;x++){auto at=(y*stride+x)*4;const auto& p=cpu.at(x,y);float expected[]={p.blue,p.green,p.red,p.alpha};for(int c=0;c<4;c++){double error=std::abs(double(expected[c])-gpu[at+c]);max_error=std::max(max_error,error);if(error)different++;}}assert(max_error<=2e-6);std::cout<<"PASS CUDA "<<name<<" vs CPU float: max channel error "<<max_error<<", differing channels "<<different<<"\n";};
+ d.settings.nearest=false;compare("Linear",false);d.settings.nearest=true;compare("Nearest",false);d.settings.nearest=false;d.settings.matte_alpha=false;compare("Linear luminance matte",true);d.settings.nearest=true;d.settings.matte_alpha=true;compare("Nearest alpha matte",true);d.settings.preview=true;compare("influence preview",false);
+ d.settings.preview=false;d.settings.nearest=false;d.settings.matte_alpha=false;Image<PF_PixelFloat> cpuTile(140,130);cpuTile.world.origin_x=390;cpuTile.world.origin_y=200;assert(renderPixels<PF_PixelFloat>(&in,&input.world,&cpuTile.world,d,true,&matte.world)==0);constexpr int tileStride=143;std::vector<float> gpuTile(tileStride*130*4);CUDAImage tileDst{gpuTile.data(),140,130,tileStride,390,200};assert(RenderCurveSmearCUDAHost(d.curve,d.settings,src,&gpuMatte,tileDst));double tile_error=0;for(int y=0;y<130;y++)for(int x=0;x<140;x++){auto at=(y*tileStride+x)*4;const auto& p=cpuTile.at(x,y);float expected[]={p.blue,p.green,p.red,p.alpha};for(int c=0;c<4;c++)tile_error=std::max(tile_error,std::abs(double(expected[c])-gpuTile[at+c]));}assert(tile_error<=2e-6);std::cout<<"PASS CUDA tiled output origin vs CPU float: max channel error "<<tile_error<<"\n";
+}
+#endif
 int main(int argc,char** argv){
  static_assert(SOURCE_MATTE==1&&MATTE_CHANNEL==2&&PATH==3&&PROFILE_GROUP==15&&PROFILE_GROUP_END==21&&LEGACY_INVERT_MATTE==22);
  static_assert(DISK_PATH==1&&DISK_PROFILE==13&&DISK_SOURCE_MATTE==18&&DISK_MATTE_CHANNEL==19&&DISK_LEGACY_INVERT_MATTE==20);
  invariants<PF_Pixel8>();invariants<PF_Pixel16>();invariants<PF_PixelFloat>();
  spatialIndexMapping();
+#ifdef CURVESMEAR_CUDA
+ cudaPixels();
+#endif
  Image<PF_PixelFloat> hdr(2,2);hdr.at(0,0)={1,4,-.5f,2};hdr.at(1,0)={0,0,0,0};
  auto sampleFloat=bilinear<PF_PixelFloat>(&hdr.world,.5,0,{},0);assert(sampleFloat.alpha==.5f&&sampleFloat.red==2&&sampleFloat.green==-.25f&&sampleFloat.blue==1);
  Image<PF_Pixel16> deep(2,2);deep.at(0,0)={32768,32768,0,0};auto q=bilinear<PF_Pixel16>(&deep.world,.5,0,{},0);assert(q.alpha==16384&&q.red==16384);
- assert(VERSION==49157);assert(FLAGS==0x02008000);assert(FLAGS2==0x08201400);
+ assert(VERSION==51205);assert(FLAGS==0x02008000);
+#ifdef CURVESMEAR_CUDA
+ assert(FLAGS2==0x0A201400);
+#else
+ assert(FLAGS2==0x08201400);
+#endif
  auto d=testData();auto a=d.curve.map({470,235},d.settings);d.settings.reverse=true;auto b=d.curve.map({470,235},d.settings);assert(a.source.x!=b.source.x);
  auto profile=smear::defaultProfile();for(double u:{0.,.25,.5,.75,1.})assert(smear::profileValue(profile,u)==1);
  profile.points[0].y=.01f;assert(std::abs(smear::profileValue(profile,0)-.01)<1e-6);assert(std::abs(smear::profileValue(profile,.5)-.505)<1e-6);assert(smear::profileValue(profile,1)==1);

@@ -8,3 +8,4 @@ test-output/
 *.exp
 *.png
 *.aex
+__pycache__/

@@ -12,6 +12,8 @@
     try {
         log.open('w'); log.writeln('ae_version,mfr,case,repeat,bpc,frames,wall_ms,wall_ms_per_frame'); log.close();
         app.beginSuppressDialogs(); suppress = true;
+        // Request CUDA explicitly when the host exposes it. CPU-only plug-ins still render normally.
+        try { app.project.gpuAccelType = GpuAccelType.CUDA; } catch (gpuError) {}
         var frames = 6;
         var comp = app.project.items.addComp('CurveSmear Benchmark 1080p', 1920, 1080, 1, frames / 24, 24);
         var source = app.project.importFile(new ImportOptions(new File(folder.fsName+'/source.png')));

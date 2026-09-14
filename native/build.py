@@ -6,6 +6,7 @@ p=argparse.ArgumentParser()
 p.add_argument('--sdk',default=r'C:\SDK\Adobe\AE_SDK\25.2\AfterEffectsSDK')
 p.add_argument('--tests',action='store_true')
 p.add_argument('--benchmark-only',action='store_true',help='Build the standalone CPU benchmark without rebuilding the plugin')
+p.add_argument('--cuda',action='store_true',help='Build CUDA GPU Smart Render support')
 p.add_argument('--output',default='CurveSmear.aex',help='Output filename inside dist/')
 args=p.parse_args()
 sdk=pathlib.Path(args.sdk)/'Examples'
@@ -21,6 +22,7 @@ build=ROOT/'build';build.mkdir(exist_ok=True)
 dist=ROOT/'dist';dist.mkdir(exist_ok=True)
 plugin=dist/args.output
 includes=[f'/I{sdk/x}' for x in ['Headers','Headers/SP','Headers/Win','Util','Resources']]
+defines=['/DCURVESMEAR_CUDA'] if args.cuda else []
 def run(argv,output=None):
     print('Running:',pathlib.Path(str(argv[0])).name,flush=True)
     if output:
@@ -29,12 +31,21 @@ def run(argv,output=None):
 if args.benchmark_only:
     run([compiler,'/nologo','/std:c++17','/EHsc','/O2','/MT','/W4','/D_CRT_SECURE_NO_WARNINGS','/DMSWindows','/D_WINDOWS',*includes,ROOT/'native/Benchmark.cpp',ROOT/'native/CurveSmearUI.cpp',f'/Fe:{build / "Benchmark.exe"}'])
     raise SystemExit(0)
-run([compiler,'/nologo','/EP',*includes,ROOT/'native/CurveSmearPiPL.r'],build/'CurveSmear.rr')
+cuda_objects=[];cuda_link=[]
+if args.cuda:
+    nvcc=pathlib.Path(shutil.which('nvcc') or '')
+    if not nvcc.is_file(): raise SystemExit('CUDA nvcc.exe must be on PATH when --cuda is used')
+    cuda_root=nvcc.parent.parent
+    cuda_object=build/'CurveSmearCUDA.obj'
+    run([nvcc,'--std=c++17','-O3','-gencode=arch=compute_75,code=[sm_75,compute_75]','-c',ROOT/'native/CurveSmearCUDA.cu','-o',cuda_object,'-I',ROOT/'native','-Xcompiler','/MT,/EHsc,/W3,/nologo,/wd4819'])
+    cuda_objects=[cuda_object]
+    cuda_link=[f'/LIBPATH:{cuda_root / "lib/x64"}','cudart_static.lib']
+run([compiler,'/nologo','/EP',*defines,*includes,ROOT/'native/CurveSmearPiPL.r'],build/'CurveSmear.rr')
 run([sdk/'Resources/PiPLTool.exe',build/'CurveSmear.rr',build/'CurveSmear.rrc'])
-run([compiler,'/nologo','/DMSWindows','/EP',build/'CurveSmear.rrc'],build/'CurveSmear.rc')
+run([compiler,'/nologo','/DMSWindows','/EP',*defines,build/'CurveSmear.rrc'],build/'CurveSmear.rc')
 run([kits/'bin'/version/'x64/rc.exe','/nologo',f'/fo{build / "CurveSmear.res"}',build/'CurveSmear.rc'])
-run([compiler,'/nologo','/std:c++17','/EHsc','/O2','/MT','/LD','/W4','/D_CRT_SECURE_NO_WARNINGS','/DMSWindows','/D_WINDOWS',*includes,ROOT/'native/CurveSmear.cpp',ROOT/'native/CurveSmearUI.cpp',build/'CurveSmear.res','/link',f'/OUT:{plugin}'])
+run([compiler,'/nologo','/std:c++17','/EHsc','/O2','/MT','/LD','/W4','/D_CRT_SECURE_NO_WARNINGS','/DMSWindows','/D_WINDOWS',*defines,*includes,ROOT/'native/CurveSmear.cpp',ROOT/'native/CurveSmearUI.cpp',*cuda_objects,build/'CurveSmear.res','/link',*cuda_link,f'/OUT:{plugin}'])
 print('Built:',plugin)
 if args.tests:
-    run([compiler,'/nologo','/std:c++17','/EHsc','/O2','/MT','/W4','/D_CRT_SECURE_NO_WARNINGS','/DMSWindows','/D_WINDOWS',*includes,ROOT/'native/CoreTests.cpp',ROOT/'native/CurveSmearUI.cpp',f'/Fe:{build / "CoreTests.exe"}'])
+    run([compiler,'/nologo','/std:c++17','/EHsc','/O2','/MT','/W4','/D_CRT_SECURE_NO_WARNINGS','/DMSWindows','/D_WINDOWS',*defines,*includes,ROOT/'native/CoreTests.cpp',ROOT/'native/CurveSmearUI.cpp',*cuda_objects,f'/Fe:{build / "CoreTests.exe"}','/link',*cuda_link])
     run([build/'CoreTests.exe'])

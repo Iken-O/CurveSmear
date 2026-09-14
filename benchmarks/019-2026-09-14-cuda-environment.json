@@ -1,0 +1,27 @@
+{
+  "date": "2026-09-14",
+  "plugin_version": "0.1.9",
+  "cpu": "Intel Core i7-14700F (20 cores, 28 threads)",
+  "gpu": "NVIDIA GeForce RTX 4060 8GB, compute capability 8.9",
+  "driver": "616.56",
+  "cuda_toolkit": "13.3",
+  "cuda_code": ["sm_75", "compute_75 PTX"],
+  "compiler": "MSVC 14.50.35717",
+  "host_flags": "/std:c++17 /O2 /MT /EHsc",
+  "cuda_flags": "--std=c++17 -O3 -gencode=arch=compute_75,code=[sm_75,compute_75] (no fast-math)",
+  "sdk_builds": ["25.2", "25.6"],
+  "ae_tests": ["25.5x4", "26.3x87"],
+  "resolution": [1920, 1080],
+  "frames_per_case": 6,
+  "hashes": {
+    "native/CurveSmear.cpp": "f13481c5c4c7d3f4247e8f1cec60757227da3a4ca5cf2e185f6f4a20d2d3949c",
+    "native/CurveSmearCUDA.cu": "a16ecdb08c2d0f6db7a0c219642b823a550b7c0995f2114b9977893ba69798fd",
+    "native/CurveSmearCUDA.h": "72fc9b9fa4671ddff12f0f242fbf0acd0019c1bfe25bb27c5a7829f837ea0370",
+    "native/SmearCore.h": "1b56d712c76ba4c79449f18d4f9613dfac804bed265e35fb37cf6d669dd0ad01",
+    "native/CoreTests.cpp": "8cad99ab7513f74d70b16bb94f29042e69e16fad11e125628e2e25524401fad2",
+    "native/build.py": "a84cd7961f79471e9007f07105259899785995aa229a02611bf95105cd141675",
+    "dist/CurveSmear.aex": "79506c3a785d0a5e3bfc77604897ae153bf41e587a419bd5ddebb5085c0c832f",
+    "dist/CurveSmear-0.1.9-cuda-sdk25.6.aex": "ed1565b15b27d450846fbefd81b14650a81bca43f959505d70950190630d12b8",
+    "dist/CurveSmear-0.1.9-cpu-sdk25.2.aex": "2b4c78e7eded43b9469c12b3065ef673e5499001ffd54b3d516e0e5626cb21aa"
+  }
+}

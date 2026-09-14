@@ -34,12 +34,21 @@ class Curve {
   }else for(const auto& segment:segments)fn(segment);
  }
 public:
+ struct SpatialView {
+  double radius=0,origin_x=0,origin_y=0;
+  std::uint32_t columns=0,rows=0;
+  const std::uint32_t* offsets=nullptr;
+  const std::uint32_t* indices=nullptr;
+  size_t offset_count=0,index_count=0;
+  bool ready=false;
+ };
  std::vector<Segment> segments;
  double length=0,left=0,top=0,right=0,bottom=0;
  void clearSpatialIndex(){index=SpatialIndex{};}
  bool spatialIndexReady()const{return index.ready;}
  size_t spatialCellCount()const{return index.ready?static_cast<size_t>(index.columns)*index.rows:0;}
  size_t spatialCandidateReferences()const{return index.ready?index.indices.size():0;}
+ SpatialView spatialView()const{return {index.radius,index.origin_x,index.origin_y,index.columns,index.rows,index.offsets.data(),index.indices.data(),index.offsets.size(),index.indices.size(),index.ready};}
  void prepareSpatialIndex(double radius){
   clearSpatialIndex();
   if(segments.empty()||radius<=0||!std::isfinite(radius)||segments.size()>std::numeric_limits<std::uint32_t>::max())return;
