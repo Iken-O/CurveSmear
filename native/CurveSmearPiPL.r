@@ -5,7 +5,7 @@ resource 'PiPL' (16000) {
    CodeWin64X86 { "EffectMain" },
    AE_PiPL_Version { 2, 0 },
    AE_Effect_Spec_Version { PF_PLUG_IN_VERSION, PF_PLUG_IN_SUBVERS },
-   AE_Effect_Version { 53253 },
+   AE_Effect_Version { 55301 },
    AE_Effect_Info_Flags { 0 },
    AE_Effect_Global_OutFlags { 0x02008000 },
 #ifdef CURVESMEAR_CUDA

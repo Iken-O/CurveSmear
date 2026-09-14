@@ -79,7 +79,7 @@ int main(int argc,char** argv){
  Image<PF_PixelFloat> hdr(2,2);hdr.at(0,0)={1,4,-.5f,2};hdr.at(1,0)={0,0,0,0};
  auto sampleFloat=bilinear<PF_PixelFloat>(&hdr.world,.5,0,{},0);assert(sampleFloat.alpha==.5f&&sampleFloat.red==2&&sampleFloat.green==-.25f&&sampleFloat.blue==1);
  Image<PF_Pixel16> deep(2,2);deep.at(0,0)={32768,32768,0,0};auto q=bilinear<PF_Pixel16>(&deep.world,.5,0,{},0);assert(q.alpha==16384&&q.red==16384);
- assert(VERSION==53253);assert(FLAGS==0x02008000);
+ assert(VERSION==55301);assert(FLAGS==0x02008000);
 #ifdef CURVESMEAR_CUDA
  assert(FLAGS2==0x0A201400);
 #else

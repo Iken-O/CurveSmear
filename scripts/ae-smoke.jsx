@@ -2,8 +2,11 @@
     var root = new File($.fileName).parent.parent;
     var folder = new Folder(root.fsName + '/test-output');
     var log = new File(folder.fsName + '/ae-smoke.log');
+    var suppress = false, ownsProject = false;
     function write(s) { $.writeln(s); try { if(log.open('a')) { log.writeln(s); log.close(); } } catch(ignore) {} }
     function renderStill(comp, name) {
+        var previous = new File(folder.fsName+'/'+name+'_00000.tif');
+        if (previous.exists) previous.remove();
         var item=app.project.renderQueue.items.add(comp);
         item.timeSpanStart=0;item.timeSpanDuration=comp.frameDuration;
         var om=item.outputModule(1), found=false;
@@ -19,7 +22,8 @@
         write('START ' + app.version);
         // This script is launched in a separate AE instance. Never replace existing work.
         if (app.project && app.project.numItems > 0) throw new Error('Expected an empty test instance; refusing to change an existing project.');
-        app.beginSuppressDialogs();
+        ownsProject = true;
+        app.beginSuppressDialogs(); suppress = true;
         var source = app.project.importFile(new ImportOptions(new File(folder.fsName + '/source.png')));
         var comp = app.project.items.addComp('CurveSmear - Study 02', 800, 520, 1, 2, 24);
         var layer = comp.layers.add(source);
@@ -36,14 +40,25 @@
         // Render once in the exact state users see immediately after adding the effect.
         // No flow path is selected yet; this must be a clean pass-through.
         renderStill(comp,'ae-no-path'); write('NO PATH OK');
-        fx.property(1).setValue(1);
-        for (var i=1; i<=fx.numProperties; i++) write(i + ': ' + fx.property(i).name + ' = ' + fx.property(i).value);
+        fx.property('Flow Path (open mask)').setValue(1);
+        for (var i=1; i<=fx.numProperties; i++) {
+            var value = '<no value>';
+            try { value = fx.property(i).value; } catch (ignoreValue) {}
+            write(i + ': ' + fx.property(i).name + ' = ' + value);
+        }
         comp.openInViewer();
         app.project.bitsPerChannel = 8;
         renderStill(comp,'ae8'); write('RENDER 8 OK');
-        fx.property(2).setValue(0);
+        var closedShape = mask.property('ADBE Mask Shape').value;
+        closedShape.closed = true;
+        mask.property('ADBE Mask Shape').setValue(closedShape);
+        renderStill(comp,'ae-closed-path'); write('CLOSED PATH PASS-THROUGH OK');
+        closedShape.closed = false;
+        mask.property('ADBE Mask Shape').setValue(closedShape);
+        renderStill(comp,'ae-reopened-path'); write('REOPENED PATH OK');
+        fx.property('Smear Amount').setValue(0);
         renderStill(comp,'ae-zero'); write('ZERO OK');
-        fx.property(2).setValue(250);
+        fx.property('Smear Amount').setValue(250);
         app.project.bitsPerChannel = 16;
         renderStill(comp,'ae16'); write('RENDER 16 OK');
         app.project.bitsPerChannel = 32;
@@ -51,6 +66,9 @@
         app.project.bitsPerChannel = 8;
         app.project.save(new File(folder.fsName + '/CurveSmear-test.aep'));
         write('SUCCESS');
-        app.endSuppressDialogs(false);
-    } catch (e) { write('ERROR ' + e.toString() + ' line ' + e.line); app.endSuppressDialogs(false); alert('CurveSmear test: ' + e.toString() + ' line ' + e.line); }
+    } catch (e) { write('ERROR ' + e.toString() + ' line ' + e.line); }
+    finally {
+        if (suppress) app.endSuppressDialogs(false);
+        if (ownsProject && app.project) app.project.close(CloseOptions.DO_NOT_SAVE_CHANGES);
+    }
 })();

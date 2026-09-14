@@ -29,7 +29,7 @@ constexpr A_long FLAGS2=PF_OutFlag2_SUPPORTS_SMART_RENDER|PF_OutFlag2_FLOAT_COLO
  |PF_OutFlag2_SUPPORTS_GPU_RENDER_F32
 #endif
  ;
-constexpr A_u_long VERSION=PF_VERSION(0,1,10,PF_Stage_DEVELOP,5);
+constexpr A_u_long VERSION=PF_VERSION(0,1,11,PF_Stage_DEVELOP,5);
 static void check(PF_Err e){if(e)throw e;}
 static A_char* paramName(PF_ParamDef& d){
 #if PF_PLUG_IN_SUBVERS >= 29
@@ -56,7 +56,7 @@ public:
  void release(){for(int k=1;k<COUNT;k++)if(acquired[k]){PF_CHECKIN_PARAM(in,&p[k]);acquired[k]=false;}}
  ~Params(){release();}
 };
-static void loadPath(PF_InData* in,PF_OutData* out,PF_PathID id,smear::Curve& curve){
+static void loadPath(PF_InData* in,PF_PathID id,smear::Curve& curve){
  if(!id)return;
  Suite<PF_PathQuerySuite1> query(in,kPFPathQuerySuite,kPFPathQuerySuiteVersion1);
  Suite<PF_PathDataSuite1> data(in,kPFPathDataSuite,kPFPathDataSuiteVersion1);
@@ -64,8 +64,7 @@ static void loadPath(PF_InData* in,PF_OutData* out,PF_PathID id,smear::Curve& cu
  if(!path)return;
  try {
   PF_Boolean open=false;check(data->PF_PathIsOpen(in->effect_ref,path,&open));
-  if(!open){std::strcpy(out->return_msg,"CurveSmear: select an open mask path (Mask Mode: None). Closed paths pass through unchanged.");}
-  else {
+  if(open){
    A_long count=0;check(data->PF_PathNumSegments(in->effect_ref,path,&count));
    for(A_long j=0;j<count;j++){
     PF_PathSegPrepPtr prep=nullptr;
@@ -83,7 +82,7 @@ static void loadPath(PF_InData* in,PF_OutData* out,PF_PathID id,smear::Curve& cu
  }catch(...){query->PF_CheckinPath(in->effect_ref,id,FALSE,path);throw;}
  check(query->PF_CheckinPath(in->effect_ref,id,FALSE,path));
 }
-static Data readData(PF_InData* in,PF_OutData* out,PF_ParamDef* p[]){
+static Data readData(PF_InData* in,PF_ParamDef* p[]){
  Data d;auto& s=d.settings;
  s.amount=std::max(0.,p[AMOUNT]->u.fs_d.value);s.radius=std::max(0.,p[RADIUS]->u.fs_d.value);
  s.feather=std::clamp(p[FEATHER]->u.fs_d.value/100,0.,1.);s.streak=std::clamp(p[STREAK]->u.fs_d.value/100,0.,1.);
@@ -94,7 +93,7 @@ static Data readData(PF_InData* in,PF_OutData* out,PF_ParamDef* p[]){
  if(auto h=p[PROFILE]->u.arb_d.value){Suite<PF_HandleSuite1> handles(in,kPFHandleSuite,kPFHandleSuiteVersion1);auto profile=static_cast<const smear::ProfileData*>(handles->host_lock_handle(h));if(!profile)throw PF_Err_OUT_OF_MEMORY;s.profile=*profile;handles->host_unlock_handle(h);smear::sanitizeProfile(s.profile);}
  s.profile.smooth=p[PROFILE_SMOOTH]->u.bd.value?1u:0u;
  smear::prepareProfile(s);
- loadPath(in,out,p[PATH]->u.path_d.path_id,d.curve);
+ loadPath(in,p[PATH]->u.path_d.path_id,d.curve);
  d.curve.prepareSpatialIndex(s.radius);return d;
 }
 static PF_Err setup(PF_InData* in_data,PF_OutData* out_data){
@@ -131,9 +130,9 @@ static PF_Err setup(PF_InData* in_data,PF_OutData* out_data){
  out_data->num_params=COUNT;return PF_Err_NONE;
 }
 static void deleteData(void* p){delete static_cast<Data*>(p);}
-static PF_Err preRender(PF_InData* in,PF_OutData* out,PF_PreRenderExtra* extra){
+static PF_Err preRender(PF_InData* in,PF_PreRenderExtra* extra){
  Params params(in);std::array<PF_ParamDef*,COUNT> p{};for(int k=1;k<COUNT;k++)p[k]=&params.p[k];
- auto d=std::make_unique<Data>(readData(in,out,p.data()));
+ auto d=std::make_unique<Data>(readData(in,p.data()));
 #ifdef CURVESMEAR_CUDA
  extra->output->flags|=PF_RenderOutputFlag_GPU_RENDER_POSSIBLE;
 #endif
@@ -241,7 +240,7 @@ extern "C" DllExport PF_Err PluginDataEntryFunction2(PF_PluginDataPtr ptr,PF_Plu
 extern "C" DllExport PF_Err EffectMain(PF_Cmd cmd,PF_InData* in,PF_OutData* out,PF_ParamDef* params[],PF_LayerDef* output,void* extra){
  try {
   switch(cmd){
-   case PF_Cmd_ABOUT:std::strcpy(out->return_msg,"CurveSmear 0.1.10\rCUDA GPU Smart Render with cached path data and CPU fallback.");break;
+   case PF_Cmd_ABOUT:std::strcpy(out->return_msg,"CurveSmear 0.1.11\rCUDA GPU Smart Render with cached path data and CPU fallback.");break;
    case PF_Cmd_GLOBAL_SETUP:out->my_version=VERSION;out->out_flags=FLAGS;out->out_flags2=FLAGS2;break;
    case PF_Cmd_PARAMS_SETUP:return setup(in,out);
    case PF_Cmd_ARBITRARY_CALLBACK:return HandleArbitrary(in,out,static_cast<PF_ArbParamsExtra*>(extra));
@@ -251,12 +250,12 @@ extern "C" DllExport PF_Err EffectMain(PF_Cmd cmd,PF_InData* in,PF_OutData* out,
    case PF_Cmd_GPU_DEVICE_SETUP:return gpuDeviceSetup(out,static_cast<PF_GPUDeviceSetupExtra*>(extra));
    case PF_Cmd_GPU_DEVICE_SETDOWN:return gpuDeviceSetdown(static_cast<PF_GPUDeviceSetdownExtra*>(extra));
 #endif
-   case PF_Cmd_SMART_PRE_RENDER:return preRender(in,out,static_cast<PF_PreRenderExtra*>(extra));
+   case PF_Cmd_SMART_PRE_RENDER:return preRender(in,static_cast<PF_PreRenderExtra*>(extra));
    case PF_Cmd_SMART_RENDER:{auto e=static_cast<PF_SmartRenderExtra*>(extra);PF_EffectWorld *input=nullptr,*matte=nullptr,*dest=nullptr;check(e->cb->checkout_layer_pixels(in->effect_ref,0,&input));check(e->cb->checkout_layer_pixels(in->effect_ref,SOURCE_MATTE,&matte));check(e->cb->checkout_output(in->effect_ref,&dest));auto d=static_cast<const Data*>(e->input->pre_render_data);if(!d||!input||!dest)return PF_Err_BAD_CALLBACK_PARAM;return render(in,input,dest,*d,true,matte);}
 #ifdef CURVESMEAR_CUDA
    case PF_Cmd_SMART_RENDER_GPU:return gpuRender(in,out,static_cast<PF_SmartRenderExtra*>(extra));
 #endif
-   case PF_Cmd_RENDER:{auto d=readData(in,out,params);PF_ParamDef matte{};check(PF_CHECKOUT_PARAM(in,SOURCE_MATTE,in->current_time,in->time_step,in->time_scale,&matte));PF_Err result=PF_Err_NONE;try{result=render(in,&params[0]->u.ld,output,d,false,matte.u.ld.data?&matte.u.ld:nullptr);}catch(...){PF_CHECKIN_PARAM(in,&matte);throw;}PF_CHECKIN_PARAM(in,&matte);return result;}
+   case PF_Cmd_RENDER:{auto d=readData(in,params);PF_ParamDef matte{};check(PF_CHECKOUT_PARAM(in,SOURCE_MATTE,in->current_time,in->time_step,in->time_scale,&matte));PF_Err result=PF_Err_NONE;try{result=render(in,&params[0]->u.ld,output,d,false,matte.u.ld.data?&matte.u.ld:nullptr);}catch(...){PF_CHECKIN_PARAM(in,&matte);throw;}PF_CHECKIN_PARAM(in,&matte);return result;}
    default:break;
   }
  }catch(PF_Err e){return e;}catch(const std::bad_alloc&){return PF_Err_OUT_OF_MEMORY;}catch(...){return PF_Err_INTERNAL_STRUCT_DAMAGED;}
