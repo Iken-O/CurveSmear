@@ -5,6 +5,7 @@ ROOT=pathlib.Path(__file__).resolve().parent.parent
 p=argparse.ArgumentParser()
 p.add_argument('--sdk',default=r'C:\SDK\Adobe\AE_SDK\25.2\AfterEffectsSDK')
 p.add_argument('--tests',action='store_true')
+p.add_argument('--benchmark-only',action='store_true',help='Build the standalone CPU benchmark without rebuilding the plugin')
 p.add_argument('--output',default='CurveSmear.aex',help='Output filename inside dist/')
 args=p.parse_args()
 sdk=pathlib.Path(args.sdk)/'Examples'
@@ -25,6 +26,9 @@ def run(argv,output=None):
     if output:
         with open(output,'wb') as stream: subprocess.run(list(map(str,argv)),env=env,cwd=build,stdout=stream,check=True)
     else: subprocess.run(list(map(str,argv)),env=env,cwd=build,check=True)
+if args.benchmark_only:
+    run([compiler,'/nologo','/std:c++17','/EHsc','/O2','/MT','/W4','/D_CRT_SECURE_NO_WARNINGS','/DMSWindows','/D_WINDOWS',*includes,ROOT/'native/Benchmark.cpp',ROOT/'native/CurveSmearUI.cpp',f'/Fe:{build / "Benchmark.exe"}'])
+    raise SystemExit(0)
 run([compiler,'/nologo','/EP',*includes,ROOT/'native/CurveSmearPiPL.r'],build/'CurveSmear.rr')
 run([sdk/'Resources/PiPLTool.exe',build/'CurveSmear.rr',build/'CurveSmear.rrc'])
 run([compiler,'/nologo','/DMSWindows','/EP',build/'CurveSmear.rrc'],build/'CurveSmear.rc')

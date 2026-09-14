@@ -1,0 +1,25 @@
+{
+  "date": "2026-09-14",
+  "plugin_version": "0.1.7",
+  "cpu": "Intel Core i7-14700F (20 cores,28 threads)",
+  "gpu": "NVIDIA RTX 4060 8GB (not used by CPU benchmark)",
+  "compiler": "MSVC 14.50.35717",
+  "flags": "/std:c++17 /O2 /MT /EHsc (no fast-math)",
+  "sdk": "25.2",
+  "native_resolution": [
+    1920,
+    1080
+  ],
+  "native_affinity": "Benchmark thread: logical CPU 2, efficiency class 1 (P core); normal priority",
+  "native_repeats": [
+    9,
+    7
+  ],
+  "cache": "Initialized buffers; first timed call recorded separately; no AE/output cache; no I/O in timed sections",
+  "hashes": {
+    "native/SmearCore.h": "71b32405f567171273139d9c23dee4f9a69770608cc4ee1d8424bb4039102e04",
+    "native/CurveSmear.cpp": "d18c4e4cff206bc2f51116df65238ab881ebf724dbe9cfd89e38436e47bf9ced",
+    "native/Benchmark.cpp": "610d2c061f67d4a3e229e21c8d4932e28d427c33475bf14790546cbbca814d7d",
+    "dist/CurveSmear.aex": "ac4b3f90ad32db4e8451d72bf2714679cff6a70a2672d18e6e5cb4608111615d"
+  }
+}
