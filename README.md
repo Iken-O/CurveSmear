@@ -1,24 +1,12 @@
-# CurveSmear 0.1.10
+# CurveSmear
 
-開いたAEマスクパスを流れとして使い、パスの周囲だけをカーブに沿って引き伸ばすWindows用After Effectsエフェクトです。
+開いたAEマスクパスを流れとして使い、パスの周囲だけをカーブに沿って引き伸ばすWindows用After Effectsエフェクト
 
 ## インストール
 
-GitHub Releasesから取得した`CurveSmear.aex`、または自分でビルドした`dist/CurveSmear.aex`を次の共通プラグインフォルダーへコピーし、After Effectsを再起動します。
+最新Releasesの`CurveSmear.aex`、または自分でビルドした`dist/CurveSmear.aex`を次の共通プラグインフォルダーへコピーし、After Effectsを再起動
 
 `C:\Program Files\Adobe\Common\Plug-ins\7.0\MediaCore\`
-
-エフェクトは「エフェクト > CurveSmear > CurveSmear」に表示されます。
-
-## 基本的な使い方
-
-1. 素材レイヤーへ開いたマスクパスを描きます。
-2. マスクモードを「なし」にします。
-3. CurveSmearを適用し、`Flow Path (open mask)`でそのマスクを選びます。
-4. `Smear Amount`と`Radius`を調整します。
-5. `Width Profile`でカーブのL側とR側それぞれの伸び倍率を調整します。
-
-選択中の素材へ基本設定を作る場合は `scripts/ApplyCurveSmear.jsx` をAEで実行できます。
 
 ## パラメーター
 
@@ -36,14 +24,6 @@ GitHub Releasesから取得した`CurveSmear.aex`、または自分でビルド�
 - `Smooth Profile`: 点の間を滑らかな曲線で補間。オフでは直線補間
 - `Source Matte`: smearへ持ち込める元ピクセルを白黒レイヤーで指定。`None`なら従来動作
 - `Matte Channel`: マットの`Luminance`または`Alpha`を使用
-
-`Width Profile`では、点をドラッグして移動し、空いている位置をクリックして中間点を追加します。`Delete Selected Point`で選択中の中間点を削除できます。`Reset`は中間点を消してL/Rを100%へ戻し、`Swap L/R`はグラフ全体を左右反転します。
-
-`Source Matte`と`Matte Channel`はエフェクトの先頭にあります。`Width Profile`はグラフ、`Smooth`、横1列の3操作ボタンを同じ折りたたみグループにまとめています。
-
-倍率グラフはカットごとの固定設定で、キーフレームには対応していません。新規エフェクトの初期値は`Flat`と`Nearest`です。
-
-`Source Matte`は変形後に参照される元画像座標で評価します。白い元ピクセルはsmearへ運ばれ、黒い元ピクセルを参照する場所は現在位置の画像を維持します。CurveとRadiusは引き続きsmearが現れ得る領域を決めるため、Source Matteの輪郭より外へ対象を伸ばせます。マットの補間は`Sampling`に従います。
 
 ## 対応と確認状況
 
